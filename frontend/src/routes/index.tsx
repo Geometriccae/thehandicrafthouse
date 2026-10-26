@@ -5,6 +5,7 @@ import artisanImg from "@/assets/artisan-bamboo.jpg";
 import { Reveal } from "@/components/site/Reveal";
 import { Leaf } from "@/components/site/Leaf";
 import { ProductCard } from "@/components/site/ProductCard";
+import { useShop } from "@/lib/shop-store";
 import { categories, products } from "@/data/products";
 
 export const Route = createFileRoute("/")({
@@ -28,7 +29,9 @@ export const Route = createFileRoute("/")({
 });
 
 function Home() {
-  const bestsellers = products.slice(0, 4);
+  const { products: liveProducts } = useShop();
+  const allProducts = liveProducts && liveProducts.length > 0 ? liveProducts : products;
+  const bestsellers = allProducts.slice(0, 4);
 
   return (
     <>
@@ -138,18 +141,26 @@ function Home() {
             <p className="eyebrow">Loved most</p>
             <h2 className="mt-2 font-display text-4xl md:text-5xl">This season's favourites</h2>
           </Reveal>
-          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {bestsellers.map((p, i) => (
-              <Reveal key={p.id} delay={i * 70}>
-                <ProductCard product={p} />
+          {bestsellers.length > 0 ? (
+            <>
+              <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                {bestsellers.map((p, i) => (
+                  <Reveal key={p.id} delay={i * 70}>
+                    <ProductCard product={p} />
+                  </Reveal>
+                ))}
+              </div>
+              <Reveal className="mt-12 text-center">
+                <Link to="/shop" className="btn-pill btn-ghost">
+                  View all products <ArrowRight className="h-4 w-4" />
+                </Link>
               </Reveal>
-            ))}
-          </div>
-          <Reveal className="mt-12 text-center">
-            <Link to="/shop" className="btn-pill btn-ghost">
-              View all products <ArrowRight className="h-4 w-4" />
-            </Link>
-          </Reveal>
+            </>
+          ) : (
+            <p className="mt-8 text-center text-sm text-muted-foreground">
+              New handcrafted creations arriving soon.
+            </p>
+          )}
         </div>
       </section>
 

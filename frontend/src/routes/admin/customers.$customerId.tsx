@@ -9,7 +9,7 @@ import type { AdminCustomer, CustomerStatus } from "@/lib/admin/types";
 
 export const Route = createFileRoute("/admin/customers/$customerId")({
   validateSearch: (search: Record<string, unknown>) => ({
-    mode: search.mode === "edit" ? ("edit" as const) : ("view" as const),
+    mode: search["mode"] === "edit" ? ("edit" as const) : ("view" as const),
   }),
   head: () => ({ meta: [{ title: "Customer — Admin" }] }),
   component: CustomerDetailPage,

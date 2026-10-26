@@ -32,6 +32,7 @@ export type AdminCollection = {
 export type AdminProduct = {
   _id: string;
   name: string;
+  tagline?: string;
   description: string;
   categoryId: string;
   collectionIds: string[];

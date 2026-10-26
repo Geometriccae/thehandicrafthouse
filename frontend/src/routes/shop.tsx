@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Reveal } from "@/components/site/Reveal";
 import { ProductCard } from "@/components/site/ProductCard";
+import { useShop } from "@/lib/shop-store";
 import { categories, products, type CategoryId } from "@/data/products";
 
 type Search = { category?: CategoryId | "all"; sort?: "featured" | "low" | "high" | "rating" };
@@ -32,15 +33,17 @@ export const Route = createFileRoute("/shop")({
 function Shop() {
   const { category = "all", sort = "featured" } = Route.useSearch();
   const [maxPrice, setMaxPrice] = useState(800);
+  const { products: liveProducts } = useShop();
+  const allProducts = liveProducts && liveProducts.length > 0 ? liveProducts : products;
 
   const list = useMemo(() => {
-    let out = products.filter((p) => p.price <= maxPrice);
+    let out = allProducts.filter((p) => p.price <= maxPrice);
     if (category !== "all") out = out.filter((p) => p.category === category);
     if (sort === "low") out = [...out].sort((a, b) => a.price - b.price);
     if (sort === "high") out = [...out].sort((a, b) => b.price - a.price);
     if (sort === "rating") out = [...out].sort((a, b) => b.rating - a.rating);
     return out;
-  }, [category, sort, maxPrice]);
+  }, [allProducts, category, sort, maxPrice]);
 
   return (
     <div className="mx-auto max-w-7xl px-5 py-16 md:px-8">

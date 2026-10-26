@@ -13,7 +13,7 @@ import type { OrderStatus } from "@/lib/admin/types";
 
 export const Route = createFileRoute("/admin/orders/$orderId")({
   validateSearch: (search: Record<string, unknown>) => ({
-    mode: search.mode === "edit" ? ("edit" as const) : ("view" as const),
+    mode: search["mode"] === "edit" ? ("edit" as const) : ("view" as const),
   }),
   head: () => ({ meta: [{ title: "Order — Admin" }] }),
   component: OrderDetailPage,

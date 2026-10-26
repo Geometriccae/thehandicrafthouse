@@ -42,13 +42,15 @@ function PaymentsPage() {
       </div>
 
       <div className="admin-tabs">
-        {[
-          ["all", "All"],
-          ["paid", "Paid"],
-          ["pending", "Pending"],
-          ["failed", "Failed"],
-          ["refunded", "Refunded"],
-        ].map(([key, label]) => (
+        {(
+          [
+            ["all", "All"],
+            ["paid", "Paid"],
+            ["pending", "Pending"],
+            ["failed", "Failed"],
+            ["refunded", "Refunded"],
+          ] as const
+        ).map(([key, label]) => (
           <button
             key={key}
             type="button"
