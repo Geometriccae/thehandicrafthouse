@@ -1,6 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  Check,
+  FileText,
+  Image as ImageIcon,
+  Layers,
+  Package,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  UploadCloud,
+  X,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { AdminBadge, AdminEmpty, AdminPageHeader } from "@/components/admin/AdminUi";
 import { formatINR, stockLabel, stockStatus } from "@/lib/admin/format";
@@ -58,7 +71,7 @@ function ProductsPage() {
             <button
               type="button"
               className="admin-btn admin-btn-primary"
-              onClick={() => setEditing(createEmptyProduct({ categoryId: state.categories[0]?._id }))}
+              onClick={() => setEditing(createEmptyProduct(state.categories[0]?._id ? { categoryId: state.categories[0]._id } : {}))}
             >
               <Plus className="h-4 w-4" /> Add Product
             </button>
@@ -256,252 +269,599 @@ function ProductForm({
   onClose: () => void;
   onSave: (p: AdminProduct) => void;
 }) {
-  const [form, setForm] = useState(product);
+  const [form, setForm] = useState<AdminProduct>(product);
+  const [activeTab, setActiveTab] = useState<"general" | "images" | "inventory">("general");
+  const [imageUrlInput, setImageUrlInput] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Close on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   function set<K extends keyof AdminProduct>(key: K, value: AdminProduct[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
-      <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-3xl bg-[var(--admin-cream)] sm:rounded-3xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--admin-border)] bg-[var(--admin-cream)]/95 px-5 py-4 backdrop-blur">
-          <h2 className="font-[family-name:var(--font-admin-display)] text-xl">
-            {product.name ? "Edit Product" : "Add Product"}
-          </h2>
-          <button type="button" className="admin-btn admin-btn-ghost" onClick={onClose}>
-            Close
+  const handleAddImageUrl = () => {
+    const trimmed = imageUrlInput.trim();
+    if (!trimmed) return;
+    set("images", [...form.images, trimmed]);
+    setImageUrlInput("");
+    toast.success("Image added from URL");
+  };
+
+  const handleFileUpload = (files: FileList | null) => {
+    if (!files || !files.length) return;
+    const fileList = Array.from(files);
+    Promise.all(
+      fileList.map(
+        (file) =>
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result ?? ""));
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+          }),
+      ),
+    )
+      .then((uploaded) => {
+        const valid = uploaded.filter(Boolean);
+        if (valid.length) {
+          set("images", [...form.images, ...valid]);
+          toast.success(valid.length > 1 ? `${valid.length} images added` : "Image added");
+        }
+      })
+      .catch(() => toast.error("Failed to read image files"));
+  };
+
+  const handleMakeCover = (index: number) => {
+    if (index === 0) return;
+    const nextImages = [...form.images];
+    const [selected] = nextImages.splice(index, 1);
+    if (selected) {
+      nextImages.unshift(selected);
+      set("images", nextImages);
+      toast.success("Cover image updated");
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    set(
+      "images",
+      form.images.filter((_, i) => i !== index),
+    );
+  };
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="admin-theme fixed inset-0 z-[999] flex items-center justify-center bg-stone-950/75 p-3 backdrop-blur-md sm:p-6"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl">
+        {/* Modal Header */}
+        <div className="flex items-center justify-between border-b border-stone-200 bg-stone-50/80 px-6 py-4">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
+                Catalog Manager
+              </span>
+              {form.sku ? (
+                <span className="rounded-md bg-stone-200/70 px-2 py-0.5 text-xs font-mono font-medium text-stone-700">
+                  #{form.sku}
+                </span>
+              ) : null}
+            </div>
+            <h2 className="font-[family-name:var(--font-admin-display)] text-2xl font-semibold text-stone-900">
+              {product.name ? `Edit “${product.name}”` : "Add New Product"}
+            </h2>
+          </div>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900"
+            onClick={onClose}
+            aria-label="Close dialog"
+          >
+            <X className="h-5 w-5" />
           </button>
         </div>
+
+        {/* Tab Navigation */}
+        <div className="flex border-b border-stone-200 bg-white px-6">
+          <button
+            type="button"
+            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+              activeTab === "general"
+                ? "border-emerald-700 font-semibold text-emerald-800"
+                : "border-transparent text-stone-500 hover:text-stone-800"
+            }`}
+            onClick={() => setActiveTab("general")}
+          >
+            <FileText className="h-4 w-4" />
+            General & Pricing
+          </button>
+          <button
+            type="button"
+            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+              activeTab === "images"
+                ? "border-emerald-700 font-semibold text-emerald-800"
+                : "border-transparent text-stone-500 hover:text-stone-800"
+            }`}
+            onClick={() => setActiveTab("images")}
+          >
+            <ImageIcon className="h-4 w-4" />
+            Images & Media
+            {form.images.length > 0 && (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-800">
+                {form.images.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+              activeTab === "inventory"
+                ? "border-emerald-700 font-semibold text-emerald-800"
+                : "border-transparent text-stone-500 hover:text-stone-800"
+            }`}
+            onClick={() => setActiveTab("inventory")}
+          >
+            <Package className="h-4 w-4" />
+            Inventory & Specs
+          </button>
+        </div>
+
+        {/* Form Body */}
         <form
-          className="space-y-6 p-5"
+          className="flex flex-1 flex-col overflow-hidden"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!form.name.trim()) return toast.error("Product name is required");
+            if (!form.name.trim()) {
+              toast.error("Product name is required");
+              setActiveTab("general");
+              return;
+            }
             onSave(form);
           }}
         >
-          <section className="space-y-3 rounded-2xl border border-[var(--admin-border)] bg-white p-4">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-[var(--admin-muted)]">
-              Product Information
-            </h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="sm:col-span-2">
-                <span className="mb-1 block text-xs font-medium">Product Name</span>
-                <input className="admin-input" value={form.name} onChange={(e) => set("name", e.target.value)} required />
-              </label>
-              <label className="sm:col-span-2">
-                <span className="mb-1 block text-xs font-medium">Description</span>
-                <textarea
-                  className="admin-textarea min-h-24"
-                  value={form.description}
-                  onChange={(e) => set("description", e.target.value)}
-                />
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Category</span>
-                <select className="admin-select" value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
-                  {categories.map((c) => (
-                    <option key={c._id} value={c._id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">SKU</span>
-                <input className="admin-input" value={form.sku} onChange={(e) => set("sku", e.target.value)} />
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Price (₹)</span>
-                <input
-                  className="admin-input"
-                  type="number"
-                  value={form.price}
-                  onChange={(e) => set("price", Number(e.target.value))}
-                />
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Discount Price (₹)</span>
-                <input
-                  className="admin-input"
-                  type="number"
-                  value={form.discountPrice ?? ""}
-                  onChange={(e) => set("discountPrice", e.target.value ? Number(e.target.value) : undefined)}
-                />
-              </label>
-            </div>
-          </section>
+          <div className="flex-1 overflow-y-auto bg-stone-50/50 p-6 sm:p-8">
+            {/* TAB 1: GENERAL & PRICING */}
+            {activeTab === "general" && (
+              <div className="mx-auto max-w-3xl space-y-6">
+                <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+                  <h3 className="mb-4 text-xs font-bold uppercase tracking-wider text-stone-500">
+                    Basic Information
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="sm:col-span-2">
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">
+                        Product Name <span className="text-rose-500">*</span>
+                      </span>
+                      <input
+                        className="admin-input font-medium"
+                        placeholder="e.g. Handwoven Bamboo Table Lamp"
+                        value={form.name}
+                        onChange={(e) => set("name", e.target.value)}
+                        required
+                      />
+                    </label>
 
-          <section className="space-y-3 rounded-2xl border border-[var(--admin-border)] bg-white p-4">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-[var(--admin-muted)]">Images</h3>
-            <p className="text-xs text-[var(--admin-muted)]">
-              Upload product images from your device. You can select one or more files.
-            </p>
-            <input
-              className="admin-input"
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(e) => {
-                const files = Array.from(e.target.files ?? []);
-                if (!files.length) return;
-                Promise.all(
-                  files.map(
-                    (file) =>
-                      new Promise<string>((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = () => resolve(String(reader.result ?? ""));
-                        reader.onerror = () => reject(reader.error);
-                        reader.readAsDataURL(file);
-                      }),
-                  ),
-                )
-                  .then((uploaded) => {
-                    const next = uploaded.filter(Boolean);
-                    set("images", next.length ? next : form.images);
-                    toast.success(next.length > 1 ? "Images uploaded" : "Image uploaded");
-                  })
-                  .catch(() => toast.error("Failed to read image file"));
-                e.target.value = "";
-              }}
-            />
-            {form.images.length ? (
-              <div className="flex flex-wrap gap-3">
-                {form.images.map((src, index) => (
-                  <div key={`${index}-${src.slice(0, 24)}`} className="relative">
-                    <img src={src} alt="" className="h-28 w-28 rounded-xl object-cover" />
-                    <button
-                      type="button"
-                      className="absolute -right-2 -top-2 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-semibold text-white"
-                      onClick={() => set("images", form.images.filter((_, i) => i !== index))}
-                    >
-                      ×
-                    </button>
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Category</span>
+                      <select
+                        className="admin-select"
+                        value={form.categoryId}
+                        onChange={(e) => set("categoryId", e.target.value)}
+                      >
+                        {categories.map((c) => (
+                          <option key={c._id} value={c._id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">SKU Code</span>
+                      <input
+                        className="admin-input uppercase"
+                        placeholder="e.g. HBL-001"
+                        value={form.sku}
+                        onChange={(e) => set("sku", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="sm:col-span-2">
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Short Tagline</span>
+                      <input
+                        className="admin-input"
+                        placeholder="e.g. Eco-friendly handcrafted accent light for warm spaces"
+                        value={form.tagline || ""}
+                        onChange={(e) => set("tagline", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="sm:col-span-2">
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Description</span>
+                      <textarea
+                        className="admin-textarea min-h-28 text-sm"
+                        placeholder="Describe the artisan craft, materials, inspiration, and styling suggestions..."
+                        value={form.description}
+                        onChange={(e) => set("description", e.target.value)}
+                      />
+                    </label>
                   </div>
-                ))}
+                </div>
+
+                <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+                  <h3 className="mb-4 text-xs font-bold uppercase tracking-wider text-stone-500">
+                    Pricing & Valuation
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">
+                        Selling Price (₹) <span className="text-rose-500">*</span>
+                      </span>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-sm font-semibold text-stone-400">
+                          ₹
+                        </span>
+                        <input
+                          className="admin-input pl-8 font-semibold"
+                          type="number"
+                          min="0"
+                          step="1"
+                          placeholder="1499"
+                          value={form.price}
+                          onChange={(e) => set("price", Number(e.target.value))}
+                          required
+                        />
+                      </div>
+                    </label>
+
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">
+                        Discount / Compare Price (₹)
+                      </span>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-sm font-semibold text-stone-400">
+                          ₹
+                        </span>
+                        <input
+                          className="admin-input pl-8"
+                          type="number"
+                          min="0"
+                          step="1"
+                          placeholder="Original price before discount"
+                          value={form.discountPrice ?? ""}
+                          onChange={(e) =>
+                            set("discountPrice", e.target.value ? Number(e.target.value) : undefined)
+                          }
+                        />
+                      </div>
+                    </label>
+                  </div>
+                </div>
               </div>
-            ) : null}
-          </section>
+            )}
 
-          <section className="space-y-3 rounded-2xl border border-[var(--admin-border)] bg-white p-4">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-[var(--admin-muted)]">Inventory</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label>
-                <span className="mb-1 block text-xs font-medium">Stock Quantity</span>
-                <input
-                  className="admin-input"
-                  type="number"
-                  value={form.stock}
-                  onChange={(e) => set("stock", Number(e.target.value))}
-                />
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Low Stock Threshold</span>
-                <input
-                  className="admin-input"
-                  type="number"
-                  value={form.lowStockThreshold}
-                  onChange={(e) => set("lowStockThreshold", Number(e.target.value))}
-                />
-              </label>
+            {/* TAB 2: IMAGES & MEDIA */}
+            {activeTab === "images" && (
+              <div className="mx-auto max-w-3xl space-y-6">
+                {/* Upload & URL Zone */}
+                <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+                  <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-stone-500">
+                    Product Imagery
+                  </h3>
+                  <p className="mb-4 text-xs text-stone-500">
+                    High quality photos help customers appreciate the craftmanship. Upload image files or paste image web URLs.
+                  </p>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {/* File Dropzone */}
+                    <div
+                      className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-stone-300 bg-stone-50/70 p-6 text-center transition-colors hover:border-emerald-600 hover:bg-emerald-50/30 cursor-pointer"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          handleFileUpload(e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                      <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-800">
+                        <UploadCloud className="h-5 w-5" />
+                      </div>
+                      <p className="text-xs font-semibold text-stone-800">Click or browse to upload files</p>
+                      <p className="mt-1 text-[11px] text-stone-400">PNG, JPG, WebP up to 10MB</p>
+                    </div>
+
+                    {/* Image URL Input */}
+                    <div className="flex flex-col justify-center rounded-xl border border-stone-200 bg-stone-50/40 p-5">
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Add Image from Web URL</span>
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          className="admin-input flex-1 text-xs"
+                          placeholder="https://images.unsplash.com/..."
+                          value={imageUrlInput}
+                          onChange={(e) => setImageUrlInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleAddImageUrl();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="admin-btn admin-btn-primary !px-3"
+                          onClick={handleAddImageUrl}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <p className="mt-2 text-[11px] text-stone-400">
+                        Paste any online image link and click + to include it.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Gallery Grid */}
+                <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-stone-500">
+                      Gallery ({form.images.length})
+                    </h3>
+                    {form.images.length > 0 && (
+                      <span className="text-xs text-stone-400">First image is the primary storefront cover</span>
+                    )}
+                  </div>
+
+                  {!form.images.length ? (
+                    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-stone-200 py-12 text-stone-400">
+                      <ImageIcon className="mb-2 h-10 w-10 opacity-40" />
+                      <p className="text-sm font-medium">No images uploaded yet</p>
+                      <p className="text-xs">Add an image above to showcase this handcrafted piece.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                      {form.images.map((src, index) => (
+                        <div
+                          key={`${index}-${src.slice(0, 30)}`}
+                          className="group relative flex flex-col overflow-hidden rounded-xl border border-stone-200 bg-stone-100 shadow-xs transition-shadow hover:shadow-md"
+                        >
+                          <div className="relative aspect-square w-full overflow-hidden bg-stone-100">
+                            <img src={src} alt="" className="h-full w-full object-cover" />
+                            {index === 0 ? (
+                              <span className="absolute left-2 top-2 rounded-md bg-emerald-800 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                                Primary Cover
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="absolute left-2 top-2 hidden rounded-md bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-xs group-hover:block hover:bg-black/80"
+                                onClick={() => handleMakeCover(index)}
+                              >
+                                Set as Cover
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg bg-rose-600 text-white shadow-sm transition-transform hover:scale-110 hover:bg-rose-700"
+                              onClick={() => handleRemoveImage(index)}
+                              title="Delete photo"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="bg-white px-2.5 py-1.5 text-center text-[10px] font-mono text-stone-500">
+                            Image #{index + 1}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: INVENTORY & SPECS */}
+            {activeTab === "inventory" && (
+              <div className="mx-auto max-w-3xl space-y-6">
+                <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+                  <h3 className="mb-4 text-xs font-bold uppercase tracking-wider text-stone-500">
+                    Stock & Availability
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Stock Quantity</span>
+                      <input
+                        className="admin-input"
+                        type="number"
+                        min="0"
+                        value={form.stock}
+                        onChange={(e) => set("stock", Number(e.target.value))}
+                      />
+                    </label>
+
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Low Stock Alert</span>
+                      <input
+                        className="admin-input"
+                        type="number"
+                        min="0"
+                        value={form.lowStockThreshold}
+                        onChange={(e) => set("lowStockThreshold", Number(e.target.value))}
+                      />
+                    </label>
+
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Status</span>
+                      <select
+                        className="admin-select"
+                        value={form.status === "deleted" ? "inactive" : form.status}
+                        onChange={(e) => set("status", e.target.value as AdminProduct["status"])}
+                      >
+                        <option value="active">Active (Visible in store)</option>
+                        <option value="inactive">Inactive (Hidden draft)</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+                  <h3 className="mb-4 text-xs font-bold uppercase tracking-wider text-stone-500">
+                    Artisan Specifications
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Craft Type</span>
+                      <select
+                        className="admin-select"
+                        value={form.craftType}
+                        onChange={(e) => set("craftType", e.target.value as CraftType)}
+                      >
+                        <option value="handwoven">Handwoven</option>
+                        <option value="handmade">Handmade</option>
+                        <option value="machine-finished">Machine Finished</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Primary Material</span>
+                      <input
+                        className="admin-input"
+                        placeholder="e.g. Natural Bamboo, Rattan, Cane"
+                        value={form.material}
+                        onChange={(e) => set("material", e.target.value)}
+                      />
+                    </label>
+
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Dimensions</span>
+                      <input
+                        className="admin-input"
+                        placeholder="e.g. 12 x 12 x 18 inches"
+                        value={form.dimensions}
+                        onChange={(e) => set("dimensions", e.target.value)}
+                      />
+                    </label>
+
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Weight</span>
+                      <input
+                        className="admin-input"
+                        placeholder="e.g. 850 grams"
+                        value={form.weight}
+                        onChange={(e) => set("weight", e.target.value)}
+                      />
+                    </label>
+
+                    <label>
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Color / Finish</span>
+                      <input
+                        className="admin-input"
+                        placeholder="e.g. Natural Warm Honey"
+                        value={form.color}
+                        onChange={(e) => set("color", e.target.value)}
+                      />
+                    </label>
+
+                    <div className="flex items-center pt-6">
+                      <label className="flex cursor-pointer items-center gap-2.5">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded-md border-stone-300 text-emerald-700 focus:ring-emerald-600"
+                          checked={form.ecoFriendly}
+                          onChange={(e) => set("ecoFriendly", e.target.checked)}
+                        />
+                        <span className="text-xs font-semibold text-stone-700">100% Eco-friendly / Biodegradable</span>
+                      </label>
+                    </div>
+
+                    <label className="sm:col-span-2">
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Care Instructions</span>
+                      <textarea
+                        className="admin-textarea min-h-20 text-sm"
+                        placeholder="e.g. Wipe clean with a soft dry cloth. Avoid prolonged exposure to moisture."
+                        value={form.careInstructions}
+                        onChange={(e) => set("careInstructions", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="sm:col-span-2">
+                      <span className="mb-1.5 block text-xs font-semibold text-stone-700">Featured Collections</span>
+                      <select
+                        className="admin-select"
+                        multiple
+                        value={form.collectionIds}
+                        onChange={(e) =>
+                          set(
+                            "collectionIds",
+                            [...e.target.selectedOptions].map((o) => o.value),
+                          )
+                        }
+                      >
+                        {collections.map((c) => (
+                          <option key={c._id} value={c._id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="mt-1 block text-[11px] text-stone-400">
+                        Hold Ctrl (or Cmd on Mac) to select multiple collections.
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Modal Sticky Footer */}
+          <div className="flex items-center justify-between border-t border-stone-200 bg-white px-6 py-4">
+            <div className="text-xs text-stone-500">
+              {form.name ? (
+                <span>
+                  Editing: <strong className="text-stone-800">{form.name}</strong>
+                </span>
+              ) : (
+                <span>New catalog item</span>
+              )}
             </div>
-          </section>
-
-          <section className="space-y-3 rounded-2xl border border-[var(--admin-border)] bg-white p-4">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-[var(--admin-muted)]">
-              Product Details
-            </h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label>
-                <span className="mb-1 block text-xs font-medium">Material</span>
-                <input className="admin-input" value={form.material} onChange={(e) => set("material", e.target.value)} />
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Craft Type</span>
-                <select
-                  className="admin-select"
-                  value={form.craftType}
-                  onChange={(e) => set("craftType", e.target.value as CraftType)}
-                >
-                  <option value="handwoven">Handwoven</option>
-                  <option value="handmade">Handmade</option>
-                  <option value="machine-finished">Machine Finished</option>
-                </select>
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Dimensions</span>
-                <input className="admin-input" value={form.dimensions} onChange={(e) => set("dimensions", e.target.value)} />
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Weight</span>
-                <input className="admin-input" value={form.weight} onChange={(e) => set("weight", e.target.value)} />
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Color</span>
-                <input className="admin-input" value={form.color} onChange={(e) => set("color", e.target.value)} />
-              </label>
-              <label className="flex items-end gap-2 pb-2">
-                <input
-                  type="checkbox"
-                  checked={form.ecoFriendly}
-                  onChange={(e) => set("ecoFriendly", e.target.checked)}
-                />
-                <span className="text-sm">Eco-friendly</span>
-              </label>
-              <label className="sm:col-span-2">
-                <span className="mb-1 block text-xs font-medium">Care Instructions</span>
-                <textarea
-                  className="admin-textarea min-h-20"
-                  value={form.careInstructions}
-                  onChange={(e) => set("careInstructions", e.target.value)}
-                />
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Status</span>
-                <select
-                  className="admin-select"
-                  value={form.status === "deleted" ? "inactive" : form.status}
-                  onChange={(e) => set("status", e.target.value as AdminProduct["status"])}
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-              </label>
-              <label>
-                <span className="mb-1 block text-xs font-medium">Collections</span>
-                <select
-                  className="admin-select"
-                  multiple
-                  value={form.collectionIds}
-                  onChange={(e) =>
-                    set(
-                      "collectionIds",
-                      [...e.target.selectedOptions].map((o) => o.value),
-                    )
-                  }
-                >
-                  {collections.map((c) => (
-                    <option key={c._id} value={c._id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="admin-btn admin-btn-ghost text-stone-600 hover:text-stone-900"
+                onClick={onClose}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="admin-btn admin-btn-primary flex items-center gap-1.5">
+                <Check className="h-4 w-4" />
+                Save Product
+              </button>
             </div>
-          </section>
-
-          <div className="flex justify-end gap-2 pb-2">
-            <button type="button" className="admin-btn admin-btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="admin-btn admin-btn-primary">
-              Save Product
-            </button>
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -516,13 +876,26 @@ function MetaDrawer({
   products: AdminProduct[];
   onClose: () => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
-      <div className="h-full w-full max-w-md overflow-y-auto bg-[var(--admin-cream)] p-5 shadow-xl">
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="font-[family-name:var(--font-admin-display)] text-xl">Categories & Collections</h2>
-          <button type="button" className="admin-btn admin-btn-ghost" onClick={onClose}>
-            Close
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="admin-theme fixed inset-0 z-[999] flex justify-end bg-stone-950/75 backdrop-blur-md"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="h-full w-full max-w-md overflow-y-auto border-l border-stone-200 bg-white p-6 shadow-2xl">
+        <div className="mb-6 flex items-center justify-between border-b border-stone-100 pb-4">
+          <h2 className="font-[family-name:var(--font-admin-display)] text-xl font-bold text-stone-900">
+            Categories & Collections
+          </h2>
+          <button
+            type="button"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-stone-200 text-stone-500 hover:bg-stone-100 hover:text-stone-900"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
           </button>
         </div>
         <section className="mb-6 rounded-2xl border border-[var(--admin-border)] bg-white p-4">
@@ -557,6 +930,7 @@ function MetaDrawer({
           </p>
         </section>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

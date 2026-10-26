@@ -9,13 +9,16 @@ import {
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { products } from "@/data/products";
+import { products, fetchStoreProducts, type Product } from "@/data/products";
 
 export type CartLine = { productId: string; quantity: number };
 
 type ShopState = {
   user: User | null;
   loadingSession: boolean;
+  products: Product[];
+  refreshProducts: () => Promise<Product[]>;
+  getProduct: (id: string) => Product | undefined;
   cart: CartLine[];
   wishlist: string[];
   cartCount: number;
@@ -43,26 +46,73 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   const [wishlist, setWishlist] = useState<string[]>([]);
   const [authOpen, setAuthOpen] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
+  const [liveProducts, setLiveProducts] = useState<Product[]>(() => products);
+
+  const refreshProducts = useCallback(async () => {
+    const list = await fetchStoreProducts();
+    setLiveProducts([...list]);
+    return list;
+  }, []);
 
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session: Session | null) => {
-      setUser(session?.user ?? null);
+    void refreshProducts();
+
+    const onFocus = () => void refreshProducts();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void refreshProducts();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    const interval = setInterval(() => {
+      void refreshProducts();
+    }, 8000);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(interval);
+    };
+  }, [refreshProducts]);
+
+  const getProductItem = useCallback(
+    (id: string) => liveProducts.find((p) => p.id === id) || products.find((p) => p.id === id),
+    [liveProducts]
+  );
+
+  useEffect(() => {
+    try {
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, session: Session | null) => {
+        setUser(session?.user ?? null);
+        setLoadingSession(false);
+      });
+      supabase.auth
+        .getSession()
+        .then(({ data }) => {
+          setUser(data?.session?.user ?? null);
+          setLoadingSession(false);
+        })
+        .catch(() => {
+          setLoadingSession(false);
+        });
+      return () => sub?.subscription?.unsubscribe();
+    } catch {
       setLoadingSession(false);
-    });
-    supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-      setLoadingSession(false);
-    });
-    return () => sub.subscription.unsubscribe();
+      return undefined;
+    }
   }, []);
 
   const refresh = useCallback(async (uid: string) => {
-    const [c, w] = await Promise.all([
-      supabase.from("cart_items").select("product_id, quantity").eq("user_id", uid),
-      supabase.from("wishlist_items").select("product_id").eq("user_id", uid),
-    ]);
-    setCart((c.data ?? []).map((r) => ({ productId: r.product_id, quantity: r.quantity })));
-    setWishlist((w.data ?? []).map((r) => r.product_id));
+    try {
+      const [c, w] = await Promise.all([
+        supabase.from("cart_items").select("product_id, quantity").eq("user_id", uid),
+        supabase.from("wishlist_items").select("product_id").eq("user_id", uid),
+      ]);
+      setCart((c?.data ?? []).map((r) => ({ productId: r.product_id, quantity: r.quantity })));
+      setWishlist((w?.data ?? []).map((r) => r.product_id));
+    } catch (err) {
+      console.warn("[Shop] Could not sync remote cart:", err);
+    }
   }, []);
 
   useEffect(() => {
@@ -150,12 +200,15 @@ export function ShopProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<ShopState>(() => {
     const cartTotal = cart.reduce((sum, line) => {
-      const p = products.find((x) => x.id === line.productId);
+      const p = liveProducts.find((x) => x.id === line.productId) || products.find((x) => x.id === line.productId);
       return sum + (p ? p.price * line.quantity : 0);
     }, 0);
     return {
       user,
       loadingSession,
+      products: liveProducts,
+      refreshProducts,
+      getProduct: getProductItem,
       cart,
       wishlist,
       cartCount: cart.reduce((n, l) => n + l.quantity, 0),
@@ -176,6 +229,9 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   }, [
     user,
     loadingSession,
+    liveProducts,
+    refreshProducts,
+    getProductItem,
     cart,
     wishlist,
     authOpen,

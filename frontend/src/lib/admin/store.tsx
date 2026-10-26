@@ -9,6 +9,7 @@ import {
 } from "react";
 import { ADMIN_SEED } from "./seed";
 import { uid } from "./format";
+import { setGlobalProducts, fetchStoreProducts } from "@/data/products";
 import type {
   AdminCustomer,
   AdminOrder,
@@ -19,7 +20,7 @@ import type {
   OrderStatus,
 } from "./types";
 
-const STORAGE_KEY = "thh-admin-data-v1";
+const STORAGE_KEY = "thh-admin-data-v2";
 
 type AdminStoreContextValue = {
   ready: boolean;
@@ -40,6 +41,11 @@ type AdminStoreContextValue = {
   getCustomerStats: (customerId: string) => { orders: number; spent: number };
 };
 
+const AdminAuthHeaders: HeadersInit = {
+  "Content-Type": "application/json",
+  "x-admin-auth": "true",
+};
+
 const AdminStoreContext = createContext<AdminStoreContextValue | null>(null);
 
 function loadState(): AdminState {
@@ -57,10 +63,72 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [state, setState] = useState<AdminState>(() => structuredClone(ADMIN_SEED));
 
+  // Sync products from MongoDB backend on initial load and periodically
+  const syncFromBackend = useCallback(async () => {
+    try {
+      const res = await fetch("/api/products?status=all&limit=1000", {
+        headers: AdminAuthHeaders,
+      });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        const serverProducts: AdminProduct[] = json.data.map((p: any) => ({
+          _id: p._id || p.id,
+          name: p.name || "",
+          tagline: p.tagline || "",
+          description: p.description || "",
+          categoryId: p.categoryId || "lighting",
+          collectionIds: Array.isArray(p.collectionIds) ? p.collectionIds : [],
+          price: Number(p.price) || 0,
+          discountPrice: p.discountPrice !== undefined ? Number(p.discountPrice) : undefined,
+          sku: p.sku || "",
+          images: Array.isArray(p.images) && p.images.length > 0 ? p.images : p.image ? [p.image] : [],
+          stock: Number(p.stock) || 0,
+          lowStockThreshold: p.lowStockThreshold ?? 5,
+          material: p.material || "Natural Bamboo",
+          dimensions: p.dimensions || "",
+          weight: p.weight || "",
+          color: p.color || "Natural",
+          ecoFriendly: p.ecoFriendly ?? true,
+          craftType: p.craftType || "handwoven",
+          careInstructions: p.careInstructions || "",
+          status: p.status || "active",
+          createdAt: p.createdAt || new Date().toISOString(),
+          updatedAt: p.updatedAt || new Date().toISOString(),
+        }));
+
+        setState((prev) => ({
+          ...prev,
+          products: serverProducts,
+        }));
+        setGlobalProducts(json.data);
+      }
+    } catch (err) {
+      console.warn("[AdminStore] Could not load products from server:", err);
+    }
+  }, []);
+
   useEffect(() => {
     setState(loadState());
     setReady(true);
-  }, []);
+    void syncFromBackend();
+
+    const onFocus = () => void syncFromBackend();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void syncFromBackend();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    const interval = setInterval(() => {
+      void syncFromBackend();
+    }, 8000);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(interval);
+    };
+  }, [syncFromBackend]);
 
   useEffect(() => {
     if (!ready) return;
@@ -71,44 +139,97 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     const next = structuredClone(ADMIN_SEED);
     setState(next);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  }, []);
+    void syncFromBackend();
+  }, [syncFromBackend]);
 
   const upsertProduct = useCallback((product: AdminProduct) => {
+    // 1. Optimistic update in local state
     setState((prev) => {
-      const exists = prev.products.some((p) => p._id === product._id);
+      const exists = prev.products.some((p) => p._id === product._id || (p.sku && p.sku === product.sku));
       return {
         ...prev,
         products: exists
-          ? prev.products.map((p) => (p._id === product._id ? product : p))
+          ? prev.products.map((p) =>
+              p._id === product._id || (p.sku && p.sku === product.sku) ? product : p
+            )
           : [product, ...prev.products],
       };
     });
-  }, []);
+
+    // 2. Persist to MongoDB backend (accessible by all devices)
+    fetch("/api/products", {
+      method: "POST",
+      headers: AdminAuthHeaders,
+      body: JSON.stringify(product),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.data) {
+          const saved = data.data;
+          setState((prev) => ({
+            ...prev,
+            products: prev.products.map((p) =>
+              p.sku === product.sku || p._id === product._id ? { ...product, _id: saved._id } : p
+            ),
+          }));
+          void fetchStoreProducts();
+          void syncFromBackend();
+        }
+      })
+      .catch((err) => console.error("[AdminStore] Error saving product to backend:", err));
+  }, [syncFromBackend]);
 
   const softDeleteProduct = useCallback((id: string) => {
     setState((prev) => ({
       ...prev,
       products: prev.products.map((p) =>
-        p._id === id ? { ...p, status: "deleted", updatedAt: new Date().toISOString() } : p,
+        p._id === id ? { ...p, status: "deleted", updatedAt: new Date().toISOString() } : p
       ),
     }));
-  }, []);
+    fetch(`/api/products/${id}/soft-delete`, {
+      method: "PATCH",
+      headers: AdminAuthHeaders,
+    })
+      .then(() => {
+        void fetchStoreProducts();
+        void syncFromBackend();
+      })
+      .catch((err) => console.error("[AdminStore] Error soft-deleting:", err));
+  }, [syncFromBackend]);
 
   const restoreProduct = useCallback((id: string) => {
     setState((prev) => ({
       ...prev,
       products: prev.products.map((p) =>
-        p._id === id ? { ...p, status: "active", updatedAt: new Date().toISOString() } : p,
+        p._id === id ? { ...p, status: "active", updatedAt: new Date().toISOString() } : p
       ),
     }));
-  }, []);
+    fetch(`/api/products/${id}/restore`, {
+      method: "PATCH",
+      headers: AdminAuthHeaders,
+    })
+      .then(() => {
+        void fetchStoreProducts();
+        void syncFromBackend();
+      })
+      .catch((err) => console.error("[AdminStore] Error restoring:", err));
+  }, [syncFromBackend]);
 
   const hardDeleteProduct = useCallback((id: string) => {
     setState((prev) => ({
       ...prev,
       products: prev.products.filter((p) => p._id !== id),
     }));
-  }, []);
+    fetch(`/api/products/${id}`, {
+      method: "DELETE",
+      headers: AdminAuthHeaders,
+    })
+      .then(() => {
+        void fetchStoreProducts();
+        void syncFromBackend();
+      })
+      .catch((err) => console.error("[AdminStore] Error hard-deleting:", err));
+  }, [syncFromBackend]);
 
   const updateStock = useCallback((id: string, stock: number, lowStockThreshold?: number) => {
     setState((prev) => ({
@@ -121,10 +242,20 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
               lowStockThreshold: lowStockThreshold ?? p.lowStockThreshold,
               updatedAt: new Date().toISOString(),
             }
-          : p,
+          : p
       ),
     }));
-  }, []);
+    fetch(`/api/products/${id}/stock`, {
+      method: "PATCH",
+      headers: AdminAuthHeaders,
+      body: JSON.stringify({ stock, lowStockThreshold }),
+    })
+      .then(() => {
+        void fetchStoreProducts();
+        void syncFromBackend();
+      })
+      .catch((err) => console.error("[AdminStore] Error updating stock:", err));
+  }, [syncFromBackend]);
 
   const updateOrderStatus = useCallback((id: string, status: OrderStatus) => {
     setState((prev) => ({
@@ -195,14 +326,14 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const getCustomerStats = useCallback(
     (customerId: string) => {
       const orders = state.orders.filter(
-        (o) => o.customerId === customerId && o.orderStatus !== "deleted" && o.orderStatus !== "cancelled",
+        (o) => o.customerId === customerId && o.orderStatus !== "deleted" && o.orderStatus !== "cancelled"
       );
       return {
         orders: orders.length,
         spent: orders.reduce((sum, o) => sum + o.total, 0),
       };
     },
-    [state.orders],
+    [state.orders]
   );
 
   const value = useMemo(
@@ -241,7 +372,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       upsertCustomer,
       deleteCustomer,
       getCustomerStats,
-    ],
+    ]
   );
 
   return <AdminStoreContext.Provider value={value}>{children}</AdminStoreContext.Provider>;
@@ -258,6 +389,7 @@ export function createEmptyProduct(partial?: Partial<AdminProduct>): AdminProduc
   return {
     _id: uid("prod"),
     name: "",
+    tagline: "",
     description: "",
     categoryId: "cat_decor",
     collectionIds: [],

@@ -3,12 +3,21 @@ import { useState } from "react";
 import { Heart, Minus, Plus, RotateCw, Star, Truck } from "lucide-react";
 import { Reveal } from "@/components/site/Reveal";
 import { ProductCard } from "@/components/site/ProductCard";
-import { formatPrice, getProduct, products } from "@/data/products";
+import { formatBackendProduct, formatPrice, getProduct, products } from "@/data/products";
 import { useShop } from "@/lib/shop-store";
 
 export const Route = createFileRoute("/product/$productId")({
-  loader: ({ params }) => {
-    const product = getProduct(params.productId);
+  loader: async ({ params }) => {
+    let product = getProduct(params.productId);
+    if (!product) {
+      try {
+        const res = await fetch(`/api/products/${params.productId}`);
+        const data = await res.json();
+        if (data.success && data.data) {
+          product = formatBackendProduct(data.data);
+        }
+      } catch {}
+    }
     if (!product) throw notFound();
     return { product };
   },
