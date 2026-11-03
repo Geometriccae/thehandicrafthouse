@@ -4,6 +4,9 @@ import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 
 // Load environment variables
 dotenv.config();
@@ -95,6 +98,34 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/settings", settingsRoutes);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve frontend build if present (for unified single-app hosting on Hostinger)
+const candidateStaticDirs = [
+  path.join(__dirname, "../public"),
+  path.join(__dirname, "public"),
+  path.join(__dirname, "../../frontend/dist/client"),
+];
+
+let activeStaticDir: string | null = null;
+for (const cand of candidateStaticDirs) {
+  if (fs.existsSync(cand) && fs.existsSync(path.join(cand, "index.html"))) {
+    activeStaticDir = cand;
+    break;
+  }
+}
+
+if (activeStaticDir) {
+  app.use(express.static(activeStaticDir));
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path === "/health") {
+      return next();
+    }
+    res.sendFile(path.join(activeStaticDir!, "index.html"));
+  });
+}
 
 // Fallback 404 handler for unknown endpoints
 app.use((req, res) => {
