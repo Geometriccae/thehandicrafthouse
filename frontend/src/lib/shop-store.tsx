@@ -7,11 +7,21 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
 import { products, fetchStoreProducts, type Product } from "@/data/products";
+import {
+  getApiBaseUrl,
+  getCustomerToken,
+  setCustomerToken,
+  getCachedCustomer,
+  setCachedCustomer,
+  getCustomerAuthHeaders,
+  type AuthCustomer,
+} from "./api";
 
 export type CartLine = { productId: string; quantity: number };
+
+// Re-export AuthCustomer as User for consumer compatibility
+export type User = AuthCustomer;
 
 type ShopState = {
   user: User | null;
@@ -35,15 +45,61 @@ type ShopState = {
   toggleWishlist: (productId: string) => Promise<boolean>;
   isWishlisted: (productId: string) => boolean;
   signOut: () => Promise<void>;
+  setUserSession: (user: User, token: string) => void;
 };
 
 const ShopContext = createContext<ShopState | null>(null);
 
+const LOCAL_CART_KEY = "thh_guest_cart";
+const LOCAL_WISHLIST_KEY = "thh_guest_wishlist";
+
+function getLocalCart(): CartLine[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_CART_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setLocalCart(cart: CartLine[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(LOCAL_CART_KEY, JSON.stringify(cart));
+  } catch {}
+}
+
+function getLocalWishlist(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_WISHLIST_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setLocalWishlist(wishlist: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(LOCAL_WISHLIST_KEY, JSON.stringify(wishlist));
+  } catch {}
+}
+
 export function ShopProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => getCachedCustomer());
   const [loadingSession, setLoadingSession] = useState(true);
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [wishlist, setWishlist] = useState<string[]>([]);
+  const [cart, setCart] = useState<CartLine[]>(() => {
+    const cached = getCachedCustomer();
+    if (cached?.cart && cached.cart.length > 0) return cached.cart;
+    return getLocalCart();
+  });
+  const [wishlist, setWishlist] = useState<string[]>(() => {
+    const cached = getCachedCustomer();
+    if (cached?.wishlistProductIds && cached.wishlistProductIds.length > 0) return cached.wishlistProductIds;
+    return getLocalWishlist();
+  });
   const [authOpen, setAuthOpen] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [liveProducts, setLiveProducts] = useState<Product[]>(() => products);
@@ -80,122 +136,207 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     [liveProducts]
   );
 
+  // Verify JWT session on mount with MongoDB Atlas backend
   useEffect(() => {
-    try {
-      const { data: sub } = supabase.auth.onAuthStateChange((_event, session: Session | null) => {
-        setUser(session?.user ?? null);
-        setLoadingSession(false);
-      });
-      supabase.auth
-        .getSession()
-        .then(({ data }) => {
-          setUser(data?.session?.user ?? null);
-          setLoadingSession(false);
-        })
-        .catch(() => {
-          setLoadingSession(false);
+    let isMounted = true;
+    async function verifySession() {
+      const token = getCustomerToken();
+      if (!token) {
+        if (isMounted) setLoadingSession(false);
+        return;
+      }
+
+      try {
+        const baseUrl = getApiBaseUrl();
+        const res = await fetch(`${baseUrl}/auth/me`, {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
         });
-      return () => sub?.subscription?.unsubscribe();
-    } catch {
-      setLoadingSession(false);
-      return undefined;
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.user) {
+            if (isMounted) {
+              setUser(data.user);
+              setCachedCustomer(data.user);
+              if (Array.isArray(data.user.cart)) {
+                setCart(data.user.cart);
+              }
+              if (Array.isArray(data.user.wishlistProductIds)) {
+                setWishlist(data.user.wishlistProductIds);
+              }
+            }
+          } else {
+            // Token rejected
+            setCustomerToken(null);
+            setCachedCustomer(null);
+            if (isMounted) setUser(null);
+          }
+        } else {
+          setCustomerToken(null);
+          setCachedCustomer(null);
+          if (isMounted) setUser(null);
+        }
+      } catch (err) {
+        console.warn("[Shop] Session verification failed (offline or network):", err);
+      } finally {
+        if (isMounted) setLoadingSession(false);
+      }
     }
+
+    void verifySession();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const refresh = useCallback(async (uid: string) => {
+  // Sync cart helper to MongoDB backend (customer ID is securely derived from JWT on server)
+  const syncCartToBackend = useCallback(async (newCart: CartLine[]) => {
+    const token = getCustomerToken();
+    if (!token) return;
     try {
-      const [c, w] = await Promise.all([
-        supabase.from("cart_items").select("product_id, quantity").eq("user_id", uid),
-        supabase.from("wishlist_items").select("product_id").eq("user_id", uid),
-      ]);
-      setCart((c?.data ?? []).map((r) => ({ productId: r.product_id, quantity: r.quantity })));
-      setWishlist((w?.data ?? []).map((r) => r.product_id));
+      const baseUrl = getApiBaseUrl();
+      await fetch(`${baseUrl}/customers/cart`, {
+        method: "POST",
+        headers: getCustomerAuthHeaders(),
+        body: JSON.stringify({ cart: newCart }),
+      });
     } catch (err) {
-      console.warn("[Shop] Could not sync remote cart:", err);
+      console.warn("[Shop] Failed to sync cart to MongoDB Atlas:", err);
     }
   }, []);
 
-  useEffect(() => {
-    if (!user) {
-      setCart([]);
-      setWishlist([]);
-      return;
+  // Sync wishlist helper to MongoDB backend (customer ID is securely derived from JWT on server)
+  const syncWishlistToBackend = useCallback(async (newWishlist: string[]) => {
+    const token = getCustomerToken();
+    if (!token) return;
+    try {
+      const baseUrl = getApiBaseUrl();
+      await fetch(`${baseUrl}/customers/wishlist`, {
+        method: "POST",
+        headers: getCustomerAuthHeaders(),
+        body: JSON.stringify({ wishlistProductIds: newWishlist }),
+      });
+    } catch (err) {
+      console.warn("[Shop] Failed to sync wishlist to MongoDB Atlas:", err);
     }
-    void refresh(user.id);
-  }, [user, refresh]);
+  }, []);
+
+  const setUserSession = useCallback(
+    (newUser: User, token: string) => {
+      setCustomerToken(token);
+      setCachedCustomer(newUser);
+      setUser(newUser);
+
+      // Merge guest cart with user cart from backend
+      const guestCart = getLocalCart();
+      let mergedCart = Array.isArray(newUser.cart) ? [...newUser.cart] : [];
+      if (guestCart.length > 0) {
+        guestCart.forEach((item) => {
+          const existing = mergedCart.find((l) => l.productId === item.productId);
+          if (existing) {
+            existing.quantity += item.quantity;
+          } else {
+            mergedCart.push(item);
+          }
+        });
+        localStorage.removeItem(LOCAL_CART_KEY);
+      }
+      setCart(mergedCart);
+      void syncCartToBackend(mergedCart);
+
+      // Merge guest wishlist with user wishlist
+      const guestWishlist = getLocalWishlist();
+      let mergedWishlist = Array.isArray(newUser.wishlistProductIds) ? [...newUser.wishlistProductIds] : [];
+      if (guestWishlist.length > 0) {
+        guestWishlist.forEach((id) => {
+          if (!mergedWishlist.includes(id)) {
+            mergedWishlist.push(id);
+          }
+        });
+        localStorage.removeItem(LOCAL_WISHLIST_KEY);
+      }
+      setWishlist(mergedWishlist);
+      void syncWishlistToBackend(mergedWishlist);
+    },
+    [syncCartToBackend, syncWishlistToBackend]
+  );
 
   const addToCart = useCallback(
     async (productId: string, quantity = 1) => {
-      if (!user) {
-        setAuthOpen(true);
-        return false;
-      }
       const existing = cart.find((l) => l.productId === productId);
-      const next = (existing?.quantity ?? 0) + quantity;
-      setCart((prev) =>
-        existing
-          ? prev.map((l) => (l.productId === productId ? { ...l, quantity: next } : l))
-          : [...prev, { productId, quantity }],
-      );
-      await supabase
-        .from("cart_items")
-        .upsert(
-          { user_id: user.id, product_id: productId, quantity: next, updated_at: new Date().toISOString() },
-          { onConflict: "user_id,product_id" },
-        );
+      const nextQuantity = (existing?.quantity ?? 0) + quantity;
+      const nextCart = existing
+        ? cart.map((l) => (l.productId === productId ? { ...l, quantity: nextQuantity } : l))
+        : [...cart, { productId, quantity }];
+
+      setCart(nextCart);
       setCartOpen(true);
+
+      if (user) {
+        await syncCartToBackend(nextCart);
+      } else {
+        setLocalCart(nextCart);
+      }
       return true;
     },
-    [user, cart],
+    [user, cart, syncCartToBackend]
   );
 
   const setQuantity = useCallback(
     async (productId: string, quantity: number) => {
-      if (!user) return;
+      let nextCart: CartLine[];
       if (quantity < 1) {
-        setCart((prev) => prev.filter((l) => l.productId !== productId));
-        await supabase.from("cart_items").delete().eq("user_id", user.id).eq("product_id", productId);
-        return;
+        nextCart = cart.filter((l) => l.productId !== productId);
+      } else {
+        nextCart = cart.map((l) => (l.productId === productId ? { ...l, quantity } : l));
       }
-      setCart((prev) => prev.map((l) => (l.productId === productId ? { ...l, quantity } : l)));
-      await supabase
-        .from("cart_items")
-        .update({ quantity, updated_at: new Date().toISOString() })
-        .eq("user_id", user.id)
-        .eq("product_id", productId);
+
+      setCart(nextCart);
+      if (user) {
+        await syncCartToBackend(nextCart);
+      } else {
+        setLocalCart(nextCart);
+      }
     },
-    [user],
+    [user, cart, syncCartToBackend]
   );
 
   const removeFromCart = useCallback(
     async (productId: string) => setQuantity(productId, 0),
-    [setQuantity],
+    [setQuantity]
   );
 
   const toggleWishlist = useCallback(
     async (productId: string) => {
-      if (!user) {
-        setAuthOpen(true);
-        return false;
-      }
+      let nextWishlist: string[];
       if (wishlist.includes(productId)) {
-        setWishlist((prev) => prev.filter((id) => id !== productId));
-        await supabase.from("wishlist_items").delete().eq("user_id", user.id).eq("product_id", productId);
+        nextWishlist = wishlist.filter((id) => id !== productId);
       } else {
-        setWishlist((prev) => [...prev, productId]);
-        await supabase
-          .from("wishlist_items")
-          .upsert({ user_id: user.id, product_id: productId }, { onConflict: "user_id,product_id" });
+        nextWishlist = [...wishlist, productId];
+      }
+
+      setWishlist(nextWishlist);
+      if (user) {
+        await syncWishlistToBackend(nextWishlist);
+      } else {
+        setLocalWishlist(nextWishlist);
       }
       return true;
     },
-    [user, wishlist],
+    [user, wishlist, syncWishlistToBackend]
   );
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    setCustomerToken(null);
+    setCachedCustomer(null);
+    setUser(null);
     setCart([]);
     setWishlist([]);
+    localStorage.removeItem(LOCAL_CART_KEY);
+    localStorage.removeItem(LOCAL_WISHLIST_KEY);
   }, []);
 
   const value = useMemo<ShopState>(() => {
@@ -225,6 +366,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       toggleWishlist,
       isWishlisted: (id: string) => wishlist.includes(id),
       signOut,
+      setUserSession,
     };
   }, [
     user,
@@ -241,6 +383,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     removeFromCart,
     toggleWishlist,
     signOut,
+    setUserSession,
   ]);
 
   return <ShopContext.Provider value={value}>{children}</ShopContext.Provider>;

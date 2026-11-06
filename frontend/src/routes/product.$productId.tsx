@@ -5,13 +5,14 @@ import { Reveal } from "@/components/site/Reveal";
 import { ProductCard } from "@/components/site/ProductCard";
 import { formatBackendProduct, formatPrice, getProduct, products } from "@/data/products";
 import { useShop } from "@/lib/shop-store";
+import { getApiBaseUrl } from "@/lib/api";
 
 export const Route = createFileRoute("/product/$productId")({
   loader: async ({ params }) => {
     let product = getProduct(params.productId);
     if (!product) {
       try {
-        const res = await fetch(`/api/products/${params.productId}`);
+        const res = await fetch(`${getApiBaseUrl()}/products/${params.productId}`);
         const data = await res.json();
         if (data.success && data.data) {
           product = formatBackendProduct(data.data);

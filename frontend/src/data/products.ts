@@ -5,6 +5,7 @@ import chair from "@/assets/p-chair.jpg";
 import office from "@/assets/p-office.jpg";
 import decor from "@/assets/p-decor.jpg";
 import gift from "@/assets/p-gift.jpg";
+import { getApiBaseUrl } from "@/lib/api";
 
 export type Product = {
   id: string;
@@ -24,6 +25,7 @@ export type Product = {
   care: string;
   dimensions: string;
   stock: number;
+  sku?: string;
 };
 
 export type CategoryId =
@@ -73,6 +75,7 @@ export function formatBackendProduct(p: any): Product {
     care: p.care || p.careInstructions || "Wipe clean with a soft dry cloth.",
     dimensions: p.dimensions || "",
     stock: Number(p.stock) || 0,
+    sku: p.sku || "",
   };
 }
 
@@ -85,7 +88,7 @@ export function setGlobalProducts(list: any[]): Product[] {
 
 export async function fetchStoreProducts(): Promise<Product[]> {
   try {
-    const res = await fetch("/api/products?limit=100");
+    const res = await fetch(`${getApiBaseUrl()}/products?limit=100`);
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
       return setGlobalProducts(json.data);

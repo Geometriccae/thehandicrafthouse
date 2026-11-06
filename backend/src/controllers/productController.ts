@@ -99,6 +99,10 @@ export async function getProductById(req: Request, res: Response): Promise<void>
   }
 }
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export async function createProduct(req: Request, res: Response): Promise<void> {
   try {
     const data = req.body || {};
@@ -111,17 +115,34 @@ export async function createProduct(req: Request, res: Response): Promise<void> 
     const cleanSku = (data.sku || `SKU-${Date.now().toString(36)}`).toUpperCase().trim();
     const categoryId = data.categoryId || data.category || "lighting";
 
-    let product = await Product.findOne({
-      $or: [
-        ...(data._id && data._id.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: data._id }] : []),
-        { sku: cleanSku },
-      ],
-    });
+    // 1. Check if product already exists by MongoDB _id (if valid ObjectId)
+    let product = null;
+    if (data._id && data._id.match(/^[0-9a-fA-F]{24}$/)) {
+      product = await Product.findById(data._id);
+    }
+
+    // 2. Or check by unique SKU
+    if (!product && cleanSku) {
+      product = await Product.findOne({ sku: cleanSku });
+    }
+
+    // 3. Prevent rapid duplicate submissions: If an identical product with the exact same
+    // name, category, and price was created within the last 2 minutes, return existing record
+    if (!product && name) {
+      const twoMinutesAgo = new Date(Date.now() - 120 * 1000);
+      product = await Product.findOne({
+        name: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") },
+        categoryId,
+        price: Number(data.price),
+        createdAt: { $gte: twoMinutesAgo },
+        status: { $ne: "deleted" },
+      });
+    }
 
     const normalizedData = {
       ...data,
       name,
-      sku: cleanSku,
+      sku: product?.sku || cleanSku,
       categoryId,
       price: Number(data.price),
       stock: data.stock !== undefined ? Number(data.stock) : 10,
@@ -143,6 +164,13 @@ export async function createProduct(req: Request, res: Response): Promise<void> 
 
     res.status(201).json({ success: true, message: "Product created successfully", data: product });
   } catch (error: any) {
+    if (error.code === 11000) {
+      res.status(409).json({
+        success: false,
+        message: `A product with SKU "${req.body?.sku || "specified"}" already exists. Please choose a unique SKU.`,
+      });
+      return;
+    }
     res.status(500).json({ success: false, message: error.message });
   }
 }
@@ -168,6 +196,13 @@ export async function updateProduct(req: Request, res: Response): Promise<void> 
 
     res.json({ success: true, message: "Product updated successfully", data: product });
   } catch (error: any) {
+    if (error.code === 11000) {
+      res.status(409).json({
+        success: false,
+        message: `A product with SKU "${req.body?.sku || "specified"}" already exists. Please choose a unique SKU.`,
+      });
+      return;
+    }
     res.status(500).json({ success: false, message: error.message });
   }
 }

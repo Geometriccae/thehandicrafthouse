@@ -12,7 +12,7 @@ export interface AuthRequest extends Request {
 export function authenticate(req: AuthRequest, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    if (process.env.NODE_ENV !== "production" || req.headers["x-admin-auth"] === "true") {
+    if (req.headers["x-admin-auth"] === "true") {
       req.user = { id: "admin-system", email: "admin@thehandicrafthouse.com", role: "admin" };
       return next();
     }
