@@ -10,7 +10,7 @@ import {
 import { ADMIN_SEED } from "./seed";
 import { uid } from "./format";
 import { setGlobalProducts, fetchStoreProducts } from "@/data/products";
-import { getApiBaseUrl, AdminAuthHeaders } from "@/lib/api";
+import { getApiBaseUrl, getAdminAuthHeaders } from "@/lib/api";
 import type {
   AdminCustomer,
   AdminOrder,
@@ -79,7 +79,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const syncFromBackend = useCallback(async () => {
     try {
       const res = await fetch(`${getApiBaseUrl()}/products?status=all&limit=1000`, {
-        headers: AdminAuthHeaders,
+        headers: getAdminAuthHeaders(),
       });
       if (!res.ok) {
         console.warn("[AdminStore] Could not load products from server, HTTP status:", res.status);
@@ -168,7 +168,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetch(`${getApiBaseUrl()}/products`, {
           method: "POST",
-          headers: AdminAuthHeaders,
+          headers: getAdminAuthHeaders(),
           body: JSON.stringify(product),
         });
 
@@ -248,7 +248,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetch(`${getApiBaseUrl()}/products/${id}/soft-delete`, {
           method: "PATCH",
-          headers: AdminAuthHeaders,
+          headers: getAdminAuthHeaders(),
         });
         const data = await res.json().catch(() => null);
         if (res.ok && data?.success) {
@@ -276,7 +276,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetch(`${getApiBaseUrl()}/products/${id}/restore`, {
           method: "PATCH",
-          headers: AdminAuthHeaders,
+          headers: getAdminAuthHeaders(),
         });
         const data = await res.json().catch(() => null);
         if (res.ok && data?.success) {
@@ -304,7 +304,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetch(`${getApiBaseUrl()}/products/${id}`, {
           method: "DELETE",
-          headers: AdminAuthHeaders,
+          headers: getAdminAuthHeaders(),
         });
         const data = await res.json().catch(() => null);
         if (res.ok && data?.success) {
@@ -330,7 +330,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetch(`${getApiBaseUrl()}/products/${id}/stock`, {
           method: "PATCH",
-          headers: AdminAuthHeaders,
+          headers: getAdminAuthHeaders(),
           body: JSON.stringify({ stock, lowStockThreshold }),
         });
         const data = await res.json().catch(() => null);

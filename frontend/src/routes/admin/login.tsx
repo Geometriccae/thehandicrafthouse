@@ -18,11 +18,11 @@ function AdminLoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
-    const result = login(email, password);
+    const result = await login(email, password);
     setLoading(false);
     if (!result.ok) {
       setError(result.error ?? "Login failed");

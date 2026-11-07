@@ -8,6 +8,7 @@ export const PRODUCTION_API_URL = "https://api-thehandicrafthouse-com-900945.hos
 
 const TOKEN_KEY = "thh_customer_token";
 const USER_KEY = "thh_customer_user";
+const ADMIN_TOKEN_KEY = "thh_admin_token";
 
 export function getApiBaseUrl(): string {
   const envUrl = import.meta.env.VITE_API_URL;
@@ -42,10 +43,31 @@ export function getApiBaseUrl(): string {
   return "/api";
 }
 
-export const AdminAuthHeaders: HeadersInit = {
-  "Content-Type": "application/json",
-  "x-admin-auth": "true",
-};
+// Admin Token & Authorization Management
+export function getAdminToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(ADMIN_TOKEN_KEY);
+}
+
+export function setAdminToken(token: string | null): void {
+  if (typeof window === "undefined") return;
+  if (token) {
+    localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+  }
+}
+
+export function getAdminAuthHeaders(): HeadersInit {
+  const token = getAdminToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 export interface AuthCustomer {
   id: string;
