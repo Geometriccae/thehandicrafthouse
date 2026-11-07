@@ -32,7 +32,9 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet());
 
 // CORS configuration supporting multiple origins
-const rawClientUrls = process.env.CLIENT_URL || "http://localhost:5173,http://localhost:3000,http://localhost:8080";
+const rawClientUrls =
+  process.env.CLIENT_URL ||
+  "https://thehandicrafthouse.com,https://www.thehandicrafthouse.com,http://localhost:5173,http://localhost:3000,http://localhost:8080";
 const allowedOrigins = rawClientUrls.split(",").map((url) => url.trim());
 
 app.use(
@@ -43,6 +45,8 @@ app.use(
       if (
         allowedOrigins.includes("*") ||
         allowedOrigins.includes(origin) ||
+        origin.endsWith("thehandicrafthouse.com") ||
+        origin.endsWith("hostingersite.com") ||
         process.env.NODE_ENV !== "production" ||
         /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin)
       ) {

@@ -21,7 +21,10 @@ export async function adminLogin(req: Request, res: Response): Promise<void> {
   const cleanEmail = email.trim().toLowerCase();
 
   // Allow default demo credentials or database user
-  if (cleanEmail === "admin@thehandicrafthouse.com" && password === "bamboo2026") {
+  if (
+    (cleanEmail === "admin@thehandicrafthouse.com" && password === "bamboo2026") ||
+    (cleanEmail === "admin@demo.com" && password === "123456")
+  ) {
     let adminUser = await User.findOne({ email: cleanEmail });
     if (!adminUser) {
       adminUser = await User.create({
