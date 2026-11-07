@@ -43,9 +43,22 @@ const htmlContent = `<!DOCTYPE html>
 </head>
 <body>
   <div id="root"></div>
+  <script>
+    // Polyfill TanStack Start router window state for SPA static hosting
+    window.$_TSR = window.$_TSR || {
+      t: new Map(),
+      buffer: [],
+      h: function() {},
+      router: {
+        manifest: { routes: {} },
+        matches: [],
+        dehydratedData: {}
+      }
+    };
+  </script>
   ${
     jsFile
-      ? `<script type="module" async src="/assets/${jsFile}"></script>`
+      ? `<script type="module" src="/assets/${jsFile}"></script>`
       : ""
   }
 </body>
