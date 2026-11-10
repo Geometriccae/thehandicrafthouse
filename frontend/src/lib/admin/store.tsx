@@ -56,15 +56,10 @@ function loadState(): AdminState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return structuredClone(ADMIN_SEED);
     const parsed = JSON.parse(raw) as Partial<AdminState>;
-    // Products must strictly come from MongoDB backend.
-    // Strip any lingering client-side temporary products (prod_...) from local storage
-    const verifiedProducts = Array.isArray(parsed.products)
-      ? parsed.products.filter((p) => p && typeof p._id === "string" && !p._id.startsWith("prod_"))
-      : [];
     return {
       ...structuredClone(ADMIN_SEED),
       ...parsed,
-      products: verifiedProducts,
+      products: [], // Products are fetched and maintained strictly from MongoDB
     } as AdminState;
   } catch {
     return structuredClone(ADMIN_SEED);
@@ -148,18 +143,24 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ready) return;
-    // Strip temporary client-side IDs to prevent corrupted offline products in localStorage
-    const cleanState = {
-      ...state,
-      products: state.products.filter((p) => p && !p._id.startsWith("prod_")),
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanState));
+    try {
+      // Exclude products from localStorage persistence.
+      // Products (including multi-megabyte base64 images) are stored and managed in MongoDB Atlas.
+      // Storing them in browser localStorage exceeds the 5MB browser quota.
+      const { products, ...restState } = state;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(restState));
+    } catch (e) {
+      console.warn("[AdminStore] Could not cache state to localStorage:", e);
+    }
   }, [state, ready]);
 
   const resetSeed = useCallback(() => {
     const next = structuredClone(ADMIN_SEED);
     setState(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    try {
+      const { products, ...restState } = next;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(restState));
+    } catch { }
     void syncFromBackend();
   }, [syncFromBackend]);
 
@@ -218,12 +219,12 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
             ...prev,
             products: exists
               ? prev.products.map((p) =>
-                  p._id === formattedSaved._id ||
+                p._id === formattedSaved._id ||
                   (p.sku && p.sku === formattedSaved.sku) ||
                   p._id === product._id
-                    ? formattedSaved
-                    : p
-                )
+                  ? formattedSaved
+                  : p
+              )
               : [formattedSaved, ...prev.products],
           };
         });
@@ -340,11 +341,11 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
             products: prev.products.map((p) =>
               p._id === id
                 ? {
-                    ...p,
-                    stock,
-                    lowStockThreshold: lowStockThreshold ?? p.lowStockThreshold,
-                    updatedAt: new Date().toISOString(),
-                  }
+                  ...p,
+                  stock,
+                  lowStockThreshold: lowStockThreshold ?? p.lowStockThreshold,
+                  updatedAt: new Date().toISOString(),
+                }
                 : p
             ),
           }));
