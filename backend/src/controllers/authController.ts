@@ -4,7 +4,7 @@ import { User } from "../models/User.js";
 import type { AuthRequest } from "../middleware/auth.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "thh_super_secret_jwt_key_handicraft_2026";
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "30d";
 
 function generateToken(id: string, email: string, role: "customer" | "admin") {
   return jwt.sign({ id, email, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN } as any);
@@ -21,7 +21,10 @@ export async function adminLogin(req: Request, res: Response): Promise<void> {
   const cleanEmail = email.trim().toLowerCase();
 
   // Allow default demo credentials or database user
-  if (cleanEmail === "admin@thehandicrafthouse.com" && password === "bamboo2026") {
+  if (
+    (cleanEmail === "admin@thehandicrafthouse.com" && password === "bamboo2026") ||
+    (cleanEmail === "admin@demo.com" && password === "123456")
+  ) {
     let adminUser = await User.findOne({ email: cleanEmail });
     if (!adminUser) {
       adminUser = await User.create({

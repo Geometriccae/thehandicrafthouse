@@ -4,6 +4,9 @@ import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 
 // Load environment variables
 dotenv.config();
@@ -29,7 +32,9 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet());
 
 // CORS configuration supporting multiple origins
-const rawClientUrls = process.env.CLIENT_URL || "http://localhost:5173,http://localhost:3000,http://localhost:8080";
+const rawClientUrls =
+  process.env.CLIENT_URL ||
+  "https://thehandicrafthouse.com,https://www.thehandicrafthouse.com,http://localhost:5173,http://localhost:3000,http://localhost:8080";
 const allowedOrigins = rawClientUrls.split(",").map((url) => url.trim());
 
 app.use(
@@ -40,7 +45,10 @@ app.use(
       if (
         allowedOrigins.includes("*") ||
         allowedOrigins.includes(origin) ||
-        process.env.NODE_ENV !== "production"
+        origin.endsWith("thehandicrafthouse.com") ||
+        origin.endsWith("hostingersite.com") ||
+        process.env.NODE_ENV !== "production" ||
+        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin)
       ) {
         return callback(null, true);
       }
@@ -95,6 +103,34 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/settings", settingsRoutes);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve frontend build if present (for unified single-app hosting on Hostinger)
+const candidateStaticDirs = [
+  path.join(__dirname, "../public"),
+  path.join(__dirname, "public"),
+  path.join(__dirname, "../../frontend/dist/client"),
+];
+
+let activeStaticDir: string | null = null;
+for (const cand of candidateStaticDirs) {
+  if (fs.existsSync(cand) && fs.existsSync(path.join(cand, "index.html"))) {
+    activeStaticDir = cand;
+    break;
+  }
+}
+
+if (activeStaticDir) {
+  app.use(express.static(activeStaticDir));
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path === "/health") {
+      return next();
+    }
+    res.sendFile(path.join(activeStaticDir!, "index.html"));
+  });
+}
 
 // Fallback 404 handler for unknown endpoints
 app.use((req, res) => {

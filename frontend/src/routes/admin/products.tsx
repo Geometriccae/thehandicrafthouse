@@ -4,6 +4,7 @@ import {
   FileText,
   Image as ImageIcon,
   Layers,
+  Loader2,
   Package,
   Plus,
   Search,
@@ -179,9 +180,10 @@ function ProductsPage() {
                             <button
                               type="button"
                               className="admin-btn admin-btn-ghost !py-1.5 !text-xs"
-                              onClick={() => {
-                                restoreProduct(p._id);
-                                toast.success("Product restored");
+                              onClick={async () => {
+                                const ok = await restoreProduct(p._id);
+                                if (ok) toast.success("Product restored");
+                                else toast.error("Failed to restore product on server");
                               }}
                             >
                               Restore
@@ -189,10 +191,11 @@ function ProductsPage() {
                             <button
                               type="button"
                               className="admin-btn admin-btn-danger !py-1.5 !text-xs"
-                              onClick={() => {
-                                if (confirm("Delete permanently?")) {
-                                  hardDeleteProduct(p._id);
-                                  toast.success("Product permanently deleted");
+                              onClick={async () => {
+                                if (confirm(`Delete "${p.name}" permanently?`)) {
+                                  const ok = await hardDeleteProduct(p._id);
+                                  if (ok) toast.success("Product permanently deleted");
+                                  else toast.error("Failed to delete product on server");
                                 }
                               }}
                             >
@@ -211,9 +214,10 @@ function ProductsPage() {
                             <button
                               type="button"
                               className="admin-btn admin-btn-danger !py-1.5 !text-xs"
-                              onClick={() => {
-                                softDeleteProduct(p._id);
-                                toast.success("Moved to deleted");
+                              onClick={async () => {
+                                const ok = await softDeleteProduct(p._id);
+                                if (ok) toast.success("Moved to deleted");
+                                else toast.error("Failed to delete product on server");
                               }}
                             >
                               Delete
@@ -236,10 +240,14 @@ function ProductsPage() {
           categories={state.categories}
           collections={state.collections}
           onClose={() => setEditing(null)}
-          onSave={(product) => {
-            upsertProduct({ ...product, updatedAt: new Date().toISOString() });
-            toast.success("Product saved");
-            setEditing(null);
+          onSave={async (product) => {
+            const res = await upsertProduct({ ...product, updatedAt: new Date().toISOString() });
+            if (res.success) {
+              toast.success("Product saved to database");
+              setEditing(null);
+            } else {
+              toast.error(res.error || "Failed to save product to database");
+            }
           }}
         />
       ) : null}
@@ -267,9 +275,10 @@ function ProductForm({
   categories: { _id: string; name: string }[];
   collections: { _id: string; name: string }[];
   onClose: () => void;
-  onSave: (p: AdminProduct) => void;
+  onSave: (p: AdminProduct) => Promise<void> | void;
 }) {
   const [form, setForm] = useState<AdminProduct>(product);
+  const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<"general" | "images" | "inventory">("general");
   const [imageUrlInput, setImageUrlInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -422,14 +431,25 @@ function ProductForm({
         {/* Form Body */}
         <form
           className="flex flex-1 flex-col overflow-hidden"
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
+            if (saving) return;
             if (!form.name.trim()) {
               toast.error("Product name is required");
               setActiveTab("general");
               return;
             }
-            onSave(form);
+            if (form.price === undefined || form.price < 0) {
+              toast.error("A valid price is required");
+              setActiveTab("general");
+              return;
+            }
+            setSaving(true);
+            try {
+              await onSave(form);
+            } finally {
+              setSaving(false);
+            }
           }}
         >
           <div className="flex-1 overflow-y-auto bg-stone-50/50 p-6 sm:p-8">
@@ -518,10 +538,13 @@ function ProductForm({
                           className="admin-input pl-8 font-semibold"
                           type="number"
                           min="0"
-                          step="1"
-                          placeholder="1499"
-                          value={form.price}
-                          onChange={(e) => set("price", Number(e.target.value))}
+                          step="any"
+                          placeholder="Enter price (e.g. 1499)"
+                          value={form.price === 0 ? "" : form.price}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            set("price", val === "" ? 0 : Number(val));
+                          }}
                           required
                         />
                       </div>
@@ -539,12 +562,13 @@ function ProductForm({
                           className="admin-input pl-8"
                           type="number"
                           min="0"
-                          step="1"
+                          step="any"
                           placeholder="Original price before discount"
-                          value={form.discountPrice ?? ""}
-                          onChange={(e) =>
-                            set("discountPrice", e.target.value ? Number(e.target.value) : undefined)
-                          }
+                          value={form.discountPrice === undefined || form.discountPrice === null ? "" : form.discountPrice}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            set("discountPrice", val === "" ? undefined : Number(val));
+                          }}
                         />
                       </div>
                     </label>
@@ -852,9 +876,13 @@ function ProductForm({
               >
                 Cancel
               </button>
-              <button type="submit" className="admin-btn admin-btn-primary flex items-center gap-1.5">
-                <Check className="h-4 w-4" />
-                Save Product
+              <button
+                type="submit"
+                disabled={saving}
+                className="admin-btn admin-btn-primary flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                {saving ? "Saving to Database..." : "Save Product"}
               </button>
             </div>
           </div>

@@ -1,7 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useAdminAuth } from "@/lib/admin/auth";
-import { DEMO_ADMIN } from "@/lib/admin/format";
 
 export const Route = createFileRoute("/admin/login")({
   head: () => ({
@@ -11,24 +10,35 @@ export const Route = createFileRoute("/admin/login")({
 });
 
 function AdminLoginPage() {
-  const { login } = useAdminAuth();
+  const { ready, session, login } = useAdminAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState(DEMO_ADMIN.email);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function onSubmit(e: FormEvent) {
+  // If already logged in, automatically redirect to admin dashboard
+  useEffect(() => {
+    if (ready && session) {
+      void navigate({ to: "/admin/dashboard", replace: true });
+    }
+  }, [ready, session, navigate]);
+
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
-    const result = login(email, password);
+    const result = await login(email, password);
     setLoading(false);
     if (!result.ok) {
       setError(result.error ?? "Login failed");
       return;
     }
-    void navigate({ to: "/admin/dashboard" });
+    void navigate({ to: "/admin/dashboard", replace: true });
+  }
+
+  if (ready && session) {
+    return null;
   }
 
   return (
@@ -62,6 +72,7 @@ function AdminLoginPage() {
               className="admin-input"
               type="email"
               autoComplete="username"
+              placeholder="Enter your email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -75,6 +86,7 @@ function AdminLoginPage() {
               className="admin-input"
               type="password"
               autoComplete="current-password"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -85,10 +97,6 @@ function AdminLoginPage() {
             {loading ? "Signing in…" : "Sign In"}
           </button>
         </form>
-
-        <p className="mt-6 text-center text-xs text-[var(--admin-muted)]">
-          Demo: {DEMO_ADMIN.email} / {DEMO_ADMIN.password}
-        </p>
       </div>
     </div>
   );

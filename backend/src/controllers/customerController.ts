@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { User } from "../models/User.js";
 import { Order } from "../models/Order.js";
+import type { AuthRequest } from "../middleware/auth.js";
 
 export async function getCustomers(req: Request, res: Response): Promise<void> {
   try {
@@ -132,9 +133,14 @@ export async function deleteCustomer(req: Request, res: Response): Promise<void>
   }
 }
 
-export async function syncCart(req: Request, res: Response): Promise<void> {
+export async function syncCart(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { userId, cart } = req.body;
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: "Authentication required" });
+      return;
+    }
+    const { cart } = req.body;
     const user = await User.findByIdAndUpdate(userId, { cart }, { new: true });
     if (!user) {
       res.status(404).json({ success: false, message: "User not found" });
@@ -146,9 +152,14 @@ export async function syncCart(req: Request, res: Response): Promise<void> {
   }
 }
 
-export async function syncWishlist(req: Request, res: Response): Promise<void> {
+export async function syncWishlist(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const { userId, wishlistProductIds } = req.body;
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: "Authentication required" });
+      return;
+    }
+    const { wishlistProductIds } = req.body;
     const user = await User.findByIdAndUpdate(userId, { wishlistProductIds }, { new: true });
     if (!user) {
       res.status(404).json({ success: false, message: "User not found" });

@@ -10,6 +10,7 @@ import {
 import { ADMIN_SEED } from "./seed";
 import { uid } from "./format";
 import { setGlobalProducts, fetchStoreProducts } from "@/data/products";
+import { getApiBaseUrl, getAdminAuthHeaders } from "@/lib/api";
 import type {
   AdminCustomer,
   AdminOrder,
@@ -22,15 +23,21 @@ import type {
 
 const STORAGE_KEY = "thh-admin-data-v2";
 
+export type UpsertProductResult = {
+  success: boolean;
+  error?: string;
+  data?: AdminProduct;
+};
+
 type AdminStoreContextValue = {
   ready: boolean;
   state: AdminState;
   resetSeed: () => void;
-  upsertProduct: (product: AdminProduct) => void;
-  softDeleteProduct: (id: string) => void;
-  restoreProduct: (id: string) => void;
-  hardDeleteProduct: (id: string) => void;
-  updateStock: (id: string, stock: number, lowStockThreshold?: number) => void;
+  upsertProduct: (product: AdminProduct) => Promise<UpsertProductResult>;
+  softDeleteProduct: (id: string) => Promise<boolean>;
+  restoreProduct: (id: string) => Promise<boolean>;
+  hardDeleteProduct: (id: string) => Promise<boolean>;
+  updateStock: (id: string, stock: number, lowStockThreshold?: number) => Promise<boolean>;
   updateOrderStatus: (id: string, status: OrderStatus) => void;
   softDeleteOrder: (id: string) => void;
   restoreOrder: (id: string) => void;
@@ -41,11 +48,6 @@ type AdminStoreContextValue = {
   getCustomerStats: (customerId: string) => { orders: number; spent: number };
 };
 
-const AdminAuthHeaders: HeadersInit = {
-  "Content-Type": "application/json",
-  "x-admin-auth": "true",
-};
-
 const AdminStoreContext = createContext<AdminStoreContextValue | null>(null);
 
 function loadState(): AdminState {
@@ -53,7 +55,12 @@ function loadState(): AdminState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return structuredClone(ADMIN_SEED);
-    return { ...structuredClone(ADMIN_SEED), ...JSON.parse(raw) } as AdminState;
+    const parsed = JSON.parse(raw) as Partial<AdminState>;
+    return {
+      ...structuredClone(ADMIN_SEED),
+      ...parsed,
+      products: [], // Products are fetched and maintained strictly from MongoDB
+    } as AdminState;
   } catch {
     return structuredClone(ADMIN_SEED);
   }
@@ -66,9 +73,13 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   // Sync products from MongoDB backend on initial load and periodically
   const syncFromBackend = useCallback(async () => {
     try {
-      const res = await fetch("/api/products?status=all&limit=1000", {
-        headers: AdminAuthHeaders,
+      const res = await fetch(`${getApiBaseUrl()}/products?status=all&limit=1000`, {
+        headers: getAdminAuthHeaders(),
       });
+      if (!res.ok) {
+        console.warn("[AdminStore] Could not load products from server, HTTP status:", res.status);
+        return;
+      }
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         const serverProducts: AdminProduct[] = json.data.map((p: any) => ({
@@ -132,130 +143,224 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ready) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      // Exclude products from localStorage persistence.
+      // Products (including multi-megabyte base64 images) are stored and managed in MongoDB Atlas.
+      // Storing them in browser localStorage exceeds the 5MB browser quota.
+      const { products, ...restState } = state;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(restState));
+    } catch (e) {
+      console.warn("[AdminStore] Could not cache state to localStorage:", e);
+    }
   }, [state, ready]);
 
   const resetSeed = useCallback(() => {
     const next = structuredClone(ADMIN_SEED);
     setState(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    try {
+      const { products, ...restState } = next;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(restState));
+    } catch { }
     void syncFromBackend();
   }, [syncFromBackend]);
 
-  const upsertProduct = useCallback((product: AdminProduct) => {
-    // 1. Optimistic update in local state
-    setState((prev) => {
-      const exists = prev.products.some((p) => p._id === product._id || (p.sku && p.sku === product.sku));
-      return {
-        ...prev,
-        products: exists
-          ? prev.products.map((p) =>
-              p._id === product._id || (p.sku && p.sku === product.sku) ? product : p
-            )
-          : [product, ...prev.products],
-      };
-    });
+  const upsertProduct = useCallback(
+    async (product: AdminProduct): Promise<UpsertProductResult> => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/products`, {
+          method: "POST",
+          headers: getAdminAuthHeaders(),
+          body: JSON.stringify(product),
+        });
 
-    // 2. Persist to MongoDB backend (accessible by all devices)
-    fetch("/api/products", {
-      method: "POST",
-      headers: AdminAuthHeaders,
-      body: JSON.stringify(product),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.data) {
-          const saved = data.data;
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok || !data || !data.success || !data.data) {
+          const errMsg = data?.message || `Server returned error (${res.status})`;
+          console.error("[AdminStore] Failed to save product to MongoDB:", errMsg);
+          return { success: false, error: errMsg };
+        }
+
+        const saved = data.data;
+        const formattedSaved: AdminProduct = {
+          _id: saved._id || saved.id,
+          name: saved.name || product.name,
+          tagline: saved.tagline || product.tagline,
+          description: saved.description || product.description,
+          categoryId: saved.categoryId || product.categoryId,
+          collectionIds: Array.isArray(saved.collectionIds) ? saved.collectionIds : product.collectionIds,
+          price: Number(saved.price) || product.price,
+          discountPrice: saved.discountPrice !== undefined ? Number(saved.discountPrice) : product.discountPrice,
+          sku: saved.sku || product.sku,
+          images: Array.isArray(saved.images) && saved.images.length > 0 ? saved.images : product.images,
+          stock: Number(saved.stock) || product.stock,
+          lowStockThreshold: saved.lowStockThreshold ?? product.lowStockThreshold,
+          material: saved.material || product.material,
+          dimensions: saved.dimensions || product.dimensions,
+          weight: saved.weight || product.weight,
+          color: saved.color || product.color,
+          ecoFriendly: saved.ecoFriendly ?? product.ecoFriendly,
+          craftType: saved.craftType || product.craftType,
+          careInstructions: saved.careInstructions || product.careInstructions,
+          status: saved.status || product.status,
+          createdAt: saved.createdAt || product.createdAt,
+          updatedAt: saved.updatedAt || new Date().toISOString(),
+        };
+
+        // Only update state with the verified MongoDB product
+        setState((prev) => {
+          const exists = prev.products.some(
+            (p) =>
+              p._id === formattedSaved._id ||
+              (p.sku && p.sku === formattedSaved.sku) ||
+              p._id === product._id
+          );
+          return {
+            ...prev,
+            products: exists
+              ? prev.products.map((p) =>
+                p._id === formattedSaved._id ||
+                  (p.sku && p.sku === formattedSaved.sku) ||
+                  p._id === product._id
+                  ? formattedSaved
+                  : p
+              )
+              : [formattedSaved, ...prev.products],
+          };
+        });
+
+        await fetchStoreProducts();
+        await syncFromBackend();
+
+        return { success: true, data: formattedSaved };
+      } catch (err: any) {
+        console.error("[AdminStore] Error saving product to backend:", err);
+        return {
+          success: false,
+          error: err.message || "Network error. Could not connect to backend server.",
+        };
+      }
+    },
+    [syncFromBackend]
+  );
+
+  const softDeleteProduct = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/products/${id}/soft-delete`, {
+          method: "PATCH",
+          headers: getAdminAuthHeaders(),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success) {
           setState((prev) => ({
             ...prev,
             products: prev.products.map((p) =>
-              p.sku === product.sku || p._id === product._id ? { ...product, _id: saved._id } : p
+              p._id === id ? { ...p, status: "deleted", updatedAt: new Date().toISOString() } : p
             ),
           }));
-          void fetchStoreProducts();
-          void syncFromBackend();
+          await fetchStoreProducts();
+          await syncFromBackend();
+          return true;
         }
-      })
-      .catch((err) => console.error("[AdminStore] Error saving product to backend:", err));
-  }, [syncFromBackend]);
+        return false;
+      } catch (err) {
+        console.error("[AdminStore] Error soft-deleting:", err);
+        return false;
+      }
+    },
+    [syncFromBackend]
+  );
 
-  const softDeleteProduct = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      products: prev.products.map((p) =>
-        p._id === id ? { ...p, status: "deleted", updatedAt: new Date().toISOString() } : p
-      ),
-    }));
-    fetch(`/api/products/${id}/soft-delete`, {
-      method: "PATCH",
-      headers: AdminAuthHeaders,
-    })
-      .then(() => {
-        void fetchStoreProducts();
-        void syncFromBackend();
-      })
-      .catch((err) => console.error("[AdminStore] Error soft-deleting:", err));
-  }, [syncFromBackend]);
+  const restoreProduct = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/products/${id}/restore`, {
+          method: "PATCH",
+          headers: getAdminAuthHeaders(),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success) {
+          setState((prev) => ({
+            ...prev,
+            products: prev.products.map((p) =>
+              p._id === id ? { ...p, status: "active", updatedAt: new Date().toISOString() } : p
+            ),
+          }));
+          await fetchStoreProducts();
+          await syncFromBackend();
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.error("[AdminStore] Error restoring:", err);
+        return false;
+      }
+    },
+    [syncFromBackend]
+  );
 
-  const restoreProduct = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      products: prev.products.map((p) =>
-        p._id === id ? { ...p, status: "active", updatedAt: new Date().toISOString() } : p
-      ),
-    }));
-    fetch(`/api/products/${id}/restore`, {
-      method: "PATCH",
-      headers: AdminAuthHeaders,
-    })
-      .then(() => {
-        void fetchStoreProducts();
-        void syncFromBackend();
-      })
-      .catch((err) => console.error("[AdminStore] Error restoring:", err));
-  }, [syncFromBackend]);
+  const hardDeleteProduct = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/products/${id}`, {
+          method: "DELETE",
+          headers: getAdminAuthHeaders(),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success) {
+          setState((prev) => ({
+            ...prev,
+            products: prev.products.filter((p) => p._id !== id),
+          }));
+          await fetchStoreProducts();
+          await syncFromBackend();
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.error("[AdminStore] Error hard-deleting:", err);
+        return false;
+      }
+    },
+    [syncFromBackend]
+  );
 
-  const hardDeleteProduct = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      products: prev.products.filter((p) => p._id !== id),
-    }));
-    fetch(`/api/products/${id}`, {
-      method: "DELETE",
-      headers: AdminAuthHeaders,
-    })
-      .then(() => {
-        void fetchStoreProducts();
-        void syncFromBackend();
-      })
-      .catch((err) => console.error("[AdminStore] Error hard-deleting:", err));
-  }, [syncFromBackend]);
-
-  const updateStock = useCallback((id: string, stock: number, lowStockThreshold?: number) => {
-    setState((prev) => ({
-      ...prev,
-      products: prev.products.map((p) =>
-        p._id === id
-          ? {
-              ...p,
-              stock,
-              lowStockThreshold: lowStockThreshold ?? p.lowStockThreshold,
-              updatedAt: new Date().toISOString(),
-            }
-          : p
-      ),
-    }));
-    fetch(`/api/products/${id}/stock`, {
-      method: "PATCH",
-      headers: AdminAuthHeaders,
-      body: JSON.stringify({ stock, lowStockThreshold }),
-    })
-      .then(() => {
-        void fetchStoreProducts();
-        void syncFromBackend();
-      })
-      .catch((err) => console.error("[AdminStore] Error updating stock:", err));
-  }, [syncFromBackend]);
+  const updateStock = useCallback(
+    async (id: string, stock: number, lowStockThreshold?: number): Promise<boolean> => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/products/${id}/stock`, {
+          method: "PATCH",
+          headers: getAdminAuthHeaders(),
+          body: JSON.stringify({ stock, lowStockThreshold }),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success) {
+          setState((prev) => ({
+            ...prev,
+            products: prev.products.map((p) =>
+              p._id === id
+                ? {
+                  ...p,
+                  stock,
+                  lowStockThreshold: lowStockThreshold ?? p.lowStockThreshold,
+                  updatedAt: new Date().toISOString(),
+                }
+                : p
+            ),
+          }));
+          await fetchStoreProducts();
+          await syncFromBackend();
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.error("[AdminStore] Error updating stock:", err);
+        return false;
+      }
+    },
+    [syncFromBackend]
+  );
 
   const updateOrderStatus = useCallback((id: string, status: OrderStatus) => {
     setState((prev) => ({

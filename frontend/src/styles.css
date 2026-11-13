@@ -417,6 +417,16 @@ iframe[src*="lovable.dev/badge"] {
     box-shadow 0.2s ease;
 }
 
+/* Hide increment/decrement spinner arrows on number inputs */
+.admin-theme input[type="number"]::-webkit-outer-spin-button,
+.admin-theme input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.admin-theme input[type="number"] {
+  -moz-appearance: textfield;
+}
+
 .admin-theme .admin-input:focus,
 .admin-theme .admin-select:focus,
 .admin-theme .admin-textarea:focus {
