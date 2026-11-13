@@ -168,13 +168,13 @@ export function ShopProvider({ children }: { children: ReactNode }) {
                 setWishlist(data.user.wishlistProductIds);
               }
             }
-          } else {
+          } else if (res.status === 401 || res.status === 403) {
             // Token rejected
             setCustomerToken(null);
             setCachedCustomer(null);
             if (isMounted) setUser(null);
           }
-        } else {
+        } else if (res.status === 401 || res.status === 403) {
           setCustomerToken(null);
           setCachedCustomer(null);
           if (isMounted) setUser(null);

@@ -7,7 +7,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { DEMO_ADMIN } from "./format";
 import { getApiBaseUrl, getAdminToken, setAdminToken } from "@/lib/api";
 
 export const ADMIN_AUTH_KEY = "thh-admin-auth-v2";
@@ -100,16 +99,21 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
               localStorage.setItem(ADMIN_AUTH_KEY, JSON.stringify(nextSession));
               setSession(nextSession);
             }
-          } else {
+          } else if (data?.user && data.user.role !== "admin") {
             logout();
           }
-        } else {
+        } else if (res.status === 401 || res.status === 403) {
+          // Token expired or invalid
           logout();
+        } else {
+          // Temporary server/network error - keep cached session
+          const cached = readAdminSession();
+          if (isMounted && cached) setSession(cached);
         }
       } catch {
         // Network offline, keep cached session if valid token exists
         const cached = readAdminSession();
-        if (isMounted) setSession(cached);
+        if (isMounted && cached) setSession(cached);
       } finally {
         if (isMounted) setReady(true);
       }
