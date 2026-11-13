@@ -29,7 +29,7 @@ export function getApiBaseUrl(): string {
           }
           return "/api";
         }
-      } catch {}
+      } catch { }
     }
     return envUrl.replace(/\/$/, "");
   }
@@ -43,18 +43,20 @@ export function getApiBaseUrl(): string {
   return "/api";
 }
 
-// Admin Token & Authorization Management
+// Admin Token & Authorization Management (stored per-session so login credentials are required on reopen)
 export function getAdminToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(ADMIN_TOKEN_KEY);
+  return sessionStorage.getItem(ADMIN_TOKEN_KEY);
 }
 
 export function setAdminToken(token: string | null): void {
   if (typeof window === "undefined") return;
+  // Ensure any persistent localStorage admin token is cleared
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
   if (token) {
-    localStorage.setItem(ADMIN_TOKEN_KEY, token);
+    sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
   } else {
-    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
   }
 }
 

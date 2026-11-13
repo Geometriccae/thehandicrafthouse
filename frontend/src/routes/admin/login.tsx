@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useAdminAuth } from "@/lib/admin/auth";
 
 export const Route = createFileRoute("/admin/login")({
@@ -10,19 +10,12 @@ export const Route = createFileRoute("/admin/login")({
 });
 
 function AdminLoginPage() {
-  const { ready, session, login } = useAdminAuth();
+  const { login } = useAdminAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-
-  // If already logged in, automatically redirect to admin dashboard
-  useEffect(() => {
-    if (ready && session) {
-      void navigate({ to: "/admin/dashboard", replace: true });
-    }
-  }, [ready, session, navigate]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -35,10 +28,6 @@ function AdminLoginPage() {
       return;
     }
     void navigate({ to: "/admin/dashboard", replace: true });
-  }
-
-  if (ready && session) {
-    return null;
   }
 
   return (

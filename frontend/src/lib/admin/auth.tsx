@@ -30,25 +30,28 @@ const AdminAuthContext = createContext<AdminAuthContextValue | null>(null);
 export function readAdminSession(): AdminSession | null {
   if (typeof window === "undefined") return null;
   try {
+    // Clear legacy localStorage admin tokens so credentials are always required per session
     localStorage.removeItem("thh-admin-auth-v1");
+    localStorage.removeItem("thh-admin-auth-v2");
+    localStorage.removeItem(ADMIN_AUTH_KEY);
 
     const token = getAdminToken();
     if (!token) {
-      localStorage.removeItem(ADMIN_AUTH_KEY);
+      sessionStorage.removeItem(ADMIN_AUTH_KEY);
       return null;
     }
 
-    const raw = localStorage.getItem(ADMIN_AUTH_KEY);
+    const raw = sessionStorage.getItem(ADMIN_AUTH_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AdminSession;
     if (!parsed?.email) {
-      localStorage.removeItem(ADMIN_AUTH_KEY);
+      sessionStorage.removeItem(ADMIN_AUTH_KEY);
       setAdminToken(null);
       return null;
     }
     return parsed;
   } catch {
-    localStorage.removeItem(ADMIN_AUTH_KEY);
+    sessionStorage.removeItem(ADMIN_AUTH_KEY);
     setAdminToken(null);
     return null;
   }
@@ -60,6 +63,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem(ADMIN_AUTH_KEY);
+    sessionStorage.removeItem(ADMIN_AUTH_KEY);
     setAdminToken(null);
     setSession(null);
   }, []);
@@ -96,7 +100,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
               loggedInAt: new Date().toISOString(),
             };
             if (isMounted) {
-              localStorage.setItem(ADMIN_AUTH_KEY, JSON.stringify(nextSession));
+              sessionStorage.setItem(ADMIN_AUTH_KEY, JSON.stringify(nextSession));
               setSession(nextSession);
             }
           } else if (data?.user && data.user.role !== "admin") {
@@ -106,14 +110,14 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
           // Token expired or invalid
           logout();
         } else {
-          // Temporary server/network error - keep cached session
+          // Temporary server/network error - keep session if valid token exists
           const cached = readAdminSession();
           if (isMounted && cached) setSession(cached);
         }
       } catch {
         // Network offline, keep cached session if valid token exists
         const cached = readAdminSession();
-        if (isMounted && cached) setSession(cached);
+        if (isMounted) setSession(cached);
       } finally {
         if (isMounted) setReady(true);
       }
@@ -143,7 +147,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
           name: data.admin.name || "Store Admin",
           loggedInAt: new Date().toISOString(),
         };
-        localStorage.setItem(ADMIN_AUTH_KEY, JSON.stringify(next));
+        sessionStorage.setItem(ADMIN_AUTH_KEY, JSON.stringify(next));
         setSession(next);
         return { ok: true };
       }
