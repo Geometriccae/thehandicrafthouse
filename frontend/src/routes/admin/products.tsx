@@ -538,10 +538,13 @@ function ProductForm({
                           className="admin-input pl-8 font-semibold"
                           type="number"
                           min="0"
-                          step="1"
-                          placeholder="1499"
-                          value={form.price}
-                          onChange={(e) => set("price", Number(e.target.value))}
+                          step="any"
+                          placeholder="Enter price (e.g. 1499)"
+                          value={form.price === 0 ? "" : form.price}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            set("price", val === "" ? 0 : Number(val));
+                          }}
                           required
                         />
                       </div>
@@ -559,12 +562,13 @@ function ProductForm({
                           className="admin-input pl-8"
                           type="number"
                           min="0"
-                          step="1"
+                          step="any"
                           placeholder="Original price before discount"
-                          value={form.discountPrice ?? ""}
-                          onChange={(e) =>
-                            set("discountPrice", e.target.value ? Number(e.target.value) : undefined)
-                          }
+                          value={form.discountPrice === undefined || form.discountPrice === null ? "" : form.discountPrice}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            set("discountPrice", val === "" ? undefined : Number(val));
+                          }}
                         />
                       </div>
                     </label>
