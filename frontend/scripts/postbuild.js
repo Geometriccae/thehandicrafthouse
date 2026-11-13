@@ -36,6 +36,8 @@ const htmlContent = `<!DOCTYPE html>
   <meta property="og:description" content="Luxury bamboo lamps, furniture, kitchenware and décor, handwoven by independent artisans."/>
   <meta name="twitter:card" content="summary_large_image"/>
   <link rel="icon" href="/favicon.ico" type="image/x-icon"/>
+  <link rel="icon" href="/favicon.png" type="image/png"/>
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous"/>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Manrope:wght@300;400;500;600&family=Inter:wght@400;500&display=swap"/>
