@@ -87,7 +87,19 @@ function DashboardPage() {
     };
   }, [state, range]);
 
-  if (!ready) return null;
+  if (!ready && !state.products.length) {
+    return (
+      <div className="admin-fade-in space-y-6">
+        <AdminPageHeader title="Dashboard" description="Loading store performance and alerts..." />
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="h-28 rounded-2xl bg-white/60 animate-pulse border border-[var(--admin-border)]" />
+          <div className="h-28 rounded-2xl bg-white/60 animate-pulse border border-[var(--admin-border)]" />
+          <div className="h-28 rounded-2xl bg-white/60 animate-pulse border border-[var(--admin-border)]" />
+          <div className="h-28 rounded-2xl bg-white/60 animate-pulse border border-[var(--admin-border)]" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="admin-fade-in space-y-6">

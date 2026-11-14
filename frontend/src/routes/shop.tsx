@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Reveal } from "@/components/site/Reveal";
 import { ProductCard } from "@/components/site/ProductCard";
 import { useShop } from "@/lib/shop-store";
-import { categories, products, type CategoryId } from "@/data/products";
+import { categories, formatPrice, normalizeCategoryId, products, type CategoryId } from "@/data/products";
 
 type Search = { category?: CategoryId | "all"; sort?: "featured" | "low" | "high" | "rating" };
 
@@ -32,18 +32,34 @@ export const Route = createFileRoute("/shop")({
 
 function Shop() {
   const { category = "all", sort = "featured" } = Route.useSearch();
-  const [maxPrice, setMaxPrice] = useState(800);
   const { products: liveProducts } = useShop();
   const allProducts = liveProducts && liveProducts.length > 0 ? liveProducts : products;
 
+  // Calculate highest price dynamically across catalogue so no product is hidden by default
+  const maxAvailablePrice = useMemo(() => {
+    if (!allProducts || allProducts.length === 0) return 5000;
+    const max = Math.max(...allProducts.map((p) => p.price || 0));
+    return Math.max(max, 5000);
+  }, [allProducts]);
+
+  // Track user-adjusted price ceiling; null means show all products without restriction
+  const [userMaxPrice, setUserMaxPrice] = useState<number | null>(null);
+  const currentMaxPrice = userMaxPrice !== null ? userMaxPrice : maxAvailablePrice;
+
   const list = useMemo(() => {
-    let out = allProducts.filter((p) => p.price <= maxPrice);
-    if (category !== "all") out = out.filter((p) => p.category === category);
+    let out = allProducts;
+    if (userMaxPrice !== null) {
+      out = out.filter((p) => p.price <= userMaxPrice);
+    }
+    if (category !== "all") {
+      const target = normalizeCategoryId(category);
+      out = out.filter((p) => normalizeCategoryId(p.category) === target);
+    }
     if (sort === "low") out = [...out].sort((a, b) => a.price - b.price);
     if (sort === "high") out = [...out].sort((a, b) => b.price - a.price);
     if (sort === "rating") out = [...out].sort((a, b) => b.rating - a.rating);
     return out;
-  }, [allProducts, category, sort, maxPrice]);
+  }, [allProducts, category, sort, userMaxPrice]);
 
   return (
     <div className="mx-auto max-w-7xl px-5 py-16 md:px-8">
@@ -88,14 +104,14 @@ function Shop() {
             <h2 className="eyebrow">Max price</h2>
             <input
               type="range"
-              min={50}
-              max={800}
-              step={10}
-              value={maxPrice}
-              onChange={(e) => setMaxPrice(Number(e.target.value))}
+              min={0}
+              max={maxAvailablePrice}
+              step={maxAvailablePrice > 5000 ? 100 : 50}
+              value={currentMaxPrice}
+              onChange={(e) => setUserMaxPrice(Number(e.target.value))}
               className="mt-4 w-full accent-primary"
             />
-            <p className="mt-1 font-ui text-sm text-muted-foreground">up to ${maxPrice}</p>
+            <p className="mt-1 font-ui text-sm text-muted-foreground">up to {formatPrice(currentMaxPrice)}</p>
           </div>
 
           <div>

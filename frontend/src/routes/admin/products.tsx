@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { AdminBadge, AdminEmpty, AdminPageHeader } from "@/components/admin/AdminUi";
 import { formatINR, stockLabel, stockStatus } from "@/lib/admin/format";
 import { createEmptyProduct, useAdminStore } from "@/lib/admin/store";
+import { normalizeCategoryId } from "@/data/products";
 import type { AdminProduct, CraftType } from "@/lib/admin/types";
 
 export const Route = createFileRoute("/admin/products")({
@@ -44,7 +45,13 @@ function ProductsPage() {
         if (tab === "inactive") return p.status === "inactive";
         return p.status === "active";
       })
-      .filter((p) => (category === "all" ? true : p.categoryId === category))
+      .filter((p) => {
+        if (category === "all") return true;
+        return (
+          p.categoryId === category ||
+          normalizeCategoryId(p.categoryId) === normalizeCategoryId(category)
+        );
+      })
       .filter((p) => {
         if (stockFilter === "all") return true;
         return stockStatus(p) === stockFilter;
@@ -56,7 +63,26 @@ function ProductsPage() {
   }, [state.products, tab, category, stockFilter, q]);
 
   function categoryName(id: string) {
-    return state.categories.find((c) => c._id === id)?.name ?? "—";
+    if (!id) return "—";
+    const found = state.categories.find(
+      (c) =>
+        c._id === id ||
+        c.slug === id ||
+        c.name.toLowerCase() === id.toLowerCase() ||
+        normalizeCategoryId(c._id) === normalizeCategoryId(id)
+    );
+    if (found) return found.name;
+    const norm = normalizeCategoryId(id);
+    const fallbackMap: Record<string, string> = {
+      lighting: "Lighting",
+      kitchen: "Kitchen & Dining",
+      storage: "Storage",
+      furniture: "Furniture",
+      office: "Office",
+      decor: "Home Decor",
+      gifting: "Gifts",
+    };
+    return fallbackMap[norm] || id || "—";
   }
 
   return (
@@ -181,7 +207,7 @@ function ProductsPage() {
                               type="button"
                               className="admin-btn admin-btn-ghost !py-1.5 !text-xs"
                               onClick={async () => {
-                                const ok = await restoreProduct(p._id);
+                                const ok = await restoreProduct(p._id, p.sku);
                                 if (ok) toast.success("Product restored");
                                 else toast.error("Failed to restore product on server");
                               }}
@@ -193,7 +219,7 @@ function ProductsPage() {
                               className="admin-btn admin-btn-danger !py-1.5 !text-xs"
                               onClick={async () => {
                                 if (confirm(`Delete "${p.name}" permanently?`)) {
-                                  const ok = await hardDeleteProduct(p._id);
+                                  const ok = await hardDeleteProduct(p._id, p.sku);
                                   if (ok) toast.success("Product permanently deleted");
                                   else toast.error("Failed to delete product on server");
                                 }
@@ -215,7 +241,7 @@ function ProductsPage() {
                               type="button"
                               className="admin-btn admin-btn-danger !py-1.5 !text-xs"
                               onClick={async () => {
-                                const ok = await softDeleteProduct(p._id);
+                                const ok = await softDeleteProduct(p._id, p.sku);
                                 if (ok) toast.success("Moved to deleted");
                                 else toast.error("Failed to delete product on server");
                               }}
