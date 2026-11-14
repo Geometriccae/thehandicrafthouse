@@ -52,8 +52,35 @@ export const categories: {
   { id: "gifting", name: "Gifting", blurb: "Thoughtful, wrapped in care", image: gift },
 ];
 
-// Live products array populated from MongoDB Atlas
-export const products: Product[] = [];
+const STORE_PRODUCTS_CACHE_KEY = "thh-store-products-v2";
+
+export function getCachedStoreProducts(): Product[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORE_PRODUCTS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setCachedStoreProducts(list: Product[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    const safe = list.map((p) => ({
+      ...p,
+      image: p.image && p.image.length > 200000 ? p.image.slice(0, 100) : p.image,
+    }));
+    localStorage.setItem(STORE_PRODUCTS_CACHE_KEY, JSON.stringify(safe));
+  } catch (e) {
+    console.warn("[Products] Could not cache store products to localStorage:", e);
+  }
+}
+
+// Live products array populated from cache and synchronized with MongoDB Atlas
+export const products: Product[] = typeof window !== "undefined" ? getCachedStoreProducts() : [];
 
 export function formatBackendProduct(p: any): Product {
   const fallbackImg = lamp;
@@ -83,6 +110,7 @@ export function setGlobalProducts(list: any[]): Product[] {
   const formatted = list.map(formatBackendProduct);
   products.length = 0;
   products.push(...formatted);
+  setCachedStoreProducts(formatted);
   return formatted;
 }
 

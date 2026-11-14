@@ -22,6 +22,35 @@ import type {
 } from "./types";
 
 const STORAGE_KEY = "thh-admin-data-v2";
+const PRODUCTS_CACHE_KEY = "thh-admin-products-v2";
+
+export function getCachedAdminProducts(): AdminProduct[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(PRODUCTS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setCachedAdminProducts(products: AdminProduct[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    // Keep cached records compact to protect localStorage quota
+    const safe = products.map((p) => ({
+      ...p,
+      images: Array.isArray(p.images)
+        ? p.images.map((img) => (img && img.length > 200000 ? img.slice(0, 100) : img))
+        : [],
+    }));
+    localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(safe));
+  } catch (e) {
+    console.warn("[AdminStore] Could not cache products to localStorage:", e);
+  }
+}
 
 export type UpsertProductResult = {
   success: boolean;
@@ -54,12 +83,18 @@ function loadState(): AdminState {
   if (typeof window === "undefined") return structuredClone(ADMIN_SEED);
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(ADMIN_SEED);
+    const cachedProducts = getCachedAdminProducts();
+    if (!raw) {
+      return {
+        ...structuredClone(ADMIN_SEED),
+        products: cachedProducts,
+      };
+    }
     const parsed = JSON.parse(raw) as Partial<AdminState>;
     return {
       ...structuredClone(ADMIN_SEED),
       ...parsed,
-      products: [], // Products are fetched and maintained strictly from MongoDB
+      products: cachedProducts,
     } as AdminState;
   } catch {
     return structuredClone(ADMIN_SEED);
@@ -68,7 +103,7 @@ function loadState(): AdminState {
 
 export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
-  const [state, setState] = useState<AdminState>(() => structuredClone(ADMIN_SEED));
+  const [state, setState] = useState<AdminState>(() => loadState());
 
   // Sync products from MongoDB backend on initial load and periodically
   const syncFromBackend = useCallback(async () => {
@@ -111,6 +146,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
           ...prev,
           products: serverProducts,
         }));
+        setCachedAdminProducts(serverProducts);
         setGlobalProducts(json.data);
       }
     } catch (err) {
@@ -215,17 +251,19 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
               (p.sku && p.sku === formattedSaved.sku) ||
               p._id === product._id
           );
+          const nextProducts = exists
+            ? prev.products.map((p) =>
+              p._id === formattedSaved._id ||
+                (p.sku && p.sku === formattedSaved.sku) ||
+                p._id === product._id
+                ? formattedSaved
+                : p
+            )
+            : [formattedSaved, ...prev.products];
+          setCachedAdminProducts(nextProducts);
           return {
             ...prev,
-            products: exists
-              ? prev.products.map((p) =>
-                p._id === formattedSaved._id ||
-                  (p.sku && p.sku === formattedSaved.sku) ||
-                  p._id === product._id
-                  ? formattedSaved
-                  : p
-              )
-              : [formattedSaved, ...prev.products],
+            products: nextProducts,
           };
         });
 
@@ -253,12 +291,13 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         });
         const data = await res.json().catch(() => null);
         if (res.ok && data?.success) {
-          setState((prev) => ({
-            ...prev,
-            products: prev.products.map((p) =>
+          setState((prev) => {
+            const next = prev.products.map((p) =>
               p._id === id ? { ...p, status: "deleted", updatedAt: new Date().toISOString() } : p
-            ),
-          }));
+            );
+            setCachedAdminProducts(next);
+            return { ...prev, products: next };
+          });
           await fetchStoreProducts();
           await syncFromBackend();
           return true;
@@ -281,12 +320,13 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         });
         const data = await res.json().catch(() => null);
         if (res.ok && data?.success) {
-          setState((prev) => ({
-            ...prev,
-            products: prev.products.map((p) =>
+          setState((prev) => {
+            const next = prev.products.map((p) =>
               p._id === id ? { ...p, status: "active", updatedAt: new Date().toISOString() } : p
-            ),
-          }));
+            );
+            setCachedAdminProducts(next);
+            return { ...prev, products: next };
+          });
           await fetchStoreProducts();
           await syncFromBackend();
           return true;
@@ -309,10 +349,11 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         });
         const data = await res.json().catch(() => null);
         if (res.ok && data?.success) {
-          setState((prev) => ({
-            ...prev,
-            products: prev.products.filter((p) => p._id !== id),
-          }));
+          setState((prev) => {
+            const next = prev.products.filter((p) => p._id !== id);
+            setCachedAdminProducts(next);
+            return { ...prev, products: next };
+          });
           await fetchStoreProducts();
           await syncFromBackend();
           return true;
@@ -336,9 +377,8 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         });
         const data = await res.json().catch(() => null);
         if (res.ok && data?.success) {
-          setState((prev) => ({
-            ...prev,
-            products: prev.products.map((p) =>
+          setState((prev) => {
+            const next = prev.products.map((p) =>
               p._id === id
                 ? {
                   ...p,
@@ -347,8 +387,10 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
                   updatedAt: new Date().toISOString(),
                 }
                 : p
-            ),
-          }));
+            );
+            setCachedAdminProducts(next);
+            return { ...prev, products: next };
+          });
           await fetchStoreProducts();
           await syncFromBackend();
           return true;

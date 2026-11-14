@@ -52,7 +52,7 @@ export async function getProducts(req: Request, res: Response): Promise<void> {
     const skip = (pageNum - 1) * limitNum;
 
     const [products, total] = await Promise.all([
-      Product.find(query).sort(sortOptions).skip(skip).limit(limitNum),
+      Product.find(query).sort(sortOptions).skip(skip).limit(limitNum).lean(),
       Product.countDocuments(query),
     ]);
 

@@ -1,17 +1,13 @@
 import { Navigate, Outlet, createFileRoute, redirect, useRouterState } from "@tanstack/react-router";
 import { AdminShell } from "@/components/admin/AdminShell";
-import { useAdminAuth, readAdminSession } from "@/lib/admin/auth";
+import { useAdminAuth } from "@/lib/admin/auth";
 import { AdminSkeleton } from "@/components/admin/AdminUi";
 
 export const Route = createFileRoute("/admin")({
   beforeLoad: ({ location }) => {
-    // `/admin` and `/admin/` should redirect to dashboard if already logged in, otherwise login
+    // `/admin` and `/admin/` should always open login requiring credentials
     const path = location.pathname.replace(/\/$/, "") || "/";
     if (path === "/admin") {
-      const session = readAdminSession();
-      if (session) {
-        throw redirect({ to: "/admin/dashboard" });
-      }
       throw redirect({ to: "/admin/login" });
     }
   },
@@ -23,9 +19,8 @@ function AdminLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isLogin = pathname === "/admin/login" || pathname.startsWith("/admin/login/");
 
-  // Always render login immediately — never block it behind a loading gate
+  // Always render login page directly so credentials are typed
   if (isLogin) {
-    if (ready && session) return <Navigate to="/admin/dashboard" replace />;
     return <Outlet />;
   }
 
