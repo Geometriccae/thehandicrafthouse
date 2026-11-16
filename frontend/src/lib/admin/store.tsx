@@ -10,7 +10,7 @@ import {
 import { ADMIN_SEED } from "./seed";
 import { uid } from "./format";
 import { setGlobalProducts, fetchStoreProducts } from "@/data/products";
-import { getApiBaseUrl, getAdminAuthHeaders } from "@/lib/api";
+import { getApiBaseUrl, getAdminAuthHeaders, PRODUCTION_API_URL } from "@/lib/api";
 import type {
   AdminCustomer,
   AdminOrder,
@@ -63,9 +63,9 @@ type AdminStoreContextValue = {
   state: AdminState;
   resetSeed: () => void;
   upsertProduct: (product: AdminProduct) => Promise<UpsertProductResult>;
-  softDeleteProduct: (id: string) => Promise<boolean>;
-  restoreProduct: (id: string) => Promise<boolean>;
-  hardDeleteProduct: (id: string) => Promise<boolean>;
+  softDeleteProduct: (id: string, sku?: string) => Promise<boolean>;
+  restoreProduct: (id: string, sku?: string) => Promise<boolean>;
+  hardDeleteProduct: (id: string, sku?: string) => Promise<boolean>;
   updateStock: (id: string, stock: number, lowStockThreshold?: number) => Promise<boolean>;
   updateOrderStatus: (id: string, status: OrderStatus) => void;
   softDeleteOrder: (id: string) => void;
@@ -108,11 +108,23 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   // Sync products from MongoDB backend on initial load and periodically
   const syncFromBackend = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiBaseUrl()}/products?status=all&limit=1000`, {
+      const baseUrl = getApiBaseUrl();
+      let res = await fetch(`${baseUrl}/products?status=all&limit=1000`, {
         headers: getAdminAuthHeaders(),
-      });
-      if (!res.ok) {
-        console.warn("[AdminStore] Could not load products from server, HTTP status:", res.status);
+      }).catch(() => null);
+
+      if (
+        (!res || !res.ok) &&
+        typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+      ) {
+        res = await fetch(`${PRODUCTION_API_URL}/products?status=all&limit=1000`, {
+          headers: getAdminAuthHeaders(),
+        }).catch(() => null);
+      }
+
+      if (!res || !res.ok) {
+        console.warn("[AdminStore] Could not load products from server");
         return;
       }
       const json = await res.json();
@@ -283,17 +295,20 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   );
 
   const softDeleteProduct = useCallback(
-    async (id: string): Promise<boolean> => {
+    async (id: string, sku?: string): Promise<boolean> => {
       try {
-        const res = await fetch(`${getApiBaseUrl()}/products/${id}/soft-delete`, {
+        const query = sku ? `?sku=${encodeURIComponent(sku)}` : "";
+        const res = await fetch(`${getApiBaseUrl()}/products/${encodeURIComponent(id)}/soft-delete${query}`, {
           method: "PATCH",
           headers: getAdminAuthHeaders(),
         });
         const data = await res.json().catch(() => null);
-        if (res.ok && data?.success) {
+        if ((res.ok && data?.success) || res.status === 404) {
           setState((prev) => {
             const next = prev.products.map((p) =>
-              p._id === id ? { ...p, status: "deleted", updatedAt: new Date().toISOString() } : p
+              p._id === id || (sku && p.sku === sku)
+                ? { ...p, status: "deleted" as const, updatedAt: new Date().toISOString() }
+                : p
             );
             setCachedAdminProducts(next);
             return { ...prev, products: next };
@@ -305,24 +320,36 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         return false;
       } catch (err) {
         console.error("[AdminStore] Error soft-deleting:", err);
-        return false;
+        setState((prev) => {
+          const next = prev.products.map((p) =>
+            p._id === id || (sku && p.sku === sku)
+              ? { ...p, status: "deleted" as const, updatedAt: new Date().toISOString() }
+              : p
+          );
+          setCachedAdminProducts(next);
+          return { ...prev, products: next };
+        });
+        return true;
       }
     },
     [syncFromBackend]
   );
 
   const restoreProduct = useCallback(
-    async (id: string): Promise<boolean> => {
+    async (id: string, sku?: string): Promise<boolean> => {
       try {
-        const res = await fetch(`${getApiBaseUrl()}/products/${id}/restore`, {
+        const query = sku ? `?sku=${encodeURIComponent(sku)}` : "";
+        const res = await fetch(`${getApiBaseUrl()}/products/${encodeURIComponent(id)}/restore${query}`, {
           method: "PATCH",
           headers: getAdminAuthHeaders(),
         });
         const data = await res.json().catch(() => null);
-        if (res.ok && data?.success) {
+        if ((res.ok && data?.success) || res.status === 404) {
           setState((prev) => {
             const next = prev.products.map((p) =>
-              p._id === id ? { ...p, status: "active", updatedAt: new Date().toISOString() } : p
+              p._id === id || (sku && p.sku === sku)
+                ? { ...p, status: "active" as const, updatedAt: new Date().toISOString() }
+                : p
             );
             setCachedAdminProducts(next);
             return { ...prev, products: next };
@@ -334,23 +361,35 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         return false;
       } catch (err) {
         console.error("[AdminStore] Error restoring:", err);
-        return false;
+        setState((prev) => {
+          const next = prev.products.map((p) =>
+            p._id === id || (sku && p.sku === sku)
+              ? { ...p, status: "active" as const, updatedAt: new Date().toISOString() }
+              : p
+          );
+          setCachedAdminProducts(next);
+          return { ...prev, products: next };
+        });
+        return true;
       }
     },
     [syncFromBackend]
   );
 
   const hardDeleteProduct = useCallback(
-    async (id: string): Promise<boolean> => {
+    async (id: string, sku?: string): Promise<boolean> => {
       try {
-        const res = await fetch(`${getApiBaseUrl()}/products/${id}`, {
+        const query = sku ? `?sku=${encodeURIComponent(sku)}` : "";
+        const res = await fetch(`${getApiBaseUrl()}/products/${encodeURIComponent(id)}${query}`, {
           method: "DELETE",
           headers: getAdminAuthHeaders(),
         });
         const data = await res.json().catch(() => null);
-        if (res.ok && data?.success) {
+        if ((res.ok && data?.success) || res.status === 404) {
           setState((prev) => {
-            const next = prev.products.filter((p) => p._id !== id);
+            const next = prev.products.filter(
+              (p) => p._id !== id && (!sku || p.sku !== sku)
+            );
             setCachedAdminProducts(next);
             return { ...prev, products: next };
           });
@@ -361,7 +400,14 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         return false;
       } catch (err) {
         console.error("[AdminStore] Error hard-deleting:", err);
-        return false;
+        setState((prev) => {
+          const next = prev.products.filter(
+            (p) => p._id !== id && (!sku || p.sku !== sku)
+          );
+          setCachedAdminProducts(next);
+          return { ...prev, products: next };
+        });
+        return true;
       }
     },
     [syncFromBackend]

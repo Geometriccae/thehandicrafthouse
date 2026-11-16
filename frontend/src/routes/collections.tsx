@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Reveal } from "@/components/site/Reveal";
-import { categories, products } from "@/data/products";
+import { categories, normalizeCategoryId, products } from "@/data/products";
 
 export const Route = createFileRoute("/collections")({
   head: () => ({
@@ -31,7 +31,7 @@ function Collections() {
 
       <div className="mt-14 space-y-6">
         {categories.map((c, i) => {
-          const count = products.filter((p) => p.category === c.id).length;
+          const count = products.filter((p) => normalizeCategoryId(p.category) === c.id).length;
           return (
             <Reveal key={c.id} delay={i * 60}>
               <Link

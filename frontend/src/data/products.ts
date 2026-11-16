@@ -5,7 +5,7 @@ import chair from "@/assets/p-chair.jpg";
 import office from "@/assets/p-office.jpg";
 import decor from "@/assets/p-decor.jpg";
 import gift from "@/assets/p-gift.jpg";
-import { getApiBaseUrl } from "@/lib/api";
+import { getApiBaseUrl, PRODUCTION_API_URL } from "@/lib/api";
 
 export type Product = {
   id: string;
@@ -36,6 +36,19 @@ export type CategoryId =
   | "office"
   | "decor"
   | "gifting";
+
+export function normalizeCategoryId(raw: string | undefined | null): CategoryId {
+  if (!raw) return "lighting";
+  const s = String(raw).toLowerCase().trim().replace(/^cat_/, "");
+  if (s.includes("light")) return "lighting";
+  if (s.includes("kitchen") || s.includes("dining")) return "kitchen";
+  if (s.includes("storage") || s.includes("basket")) return "storage";
+  if (s.includes("furnitur") || s.includes("chair") || s.includes("table")) return "furniture";
+  if (s.includes("office") || s.includes("desk")) return "office";
+  if (s.includes("decor") || s.includes("décor") || s.includes("wall")) return "decor";
+  if (s.includes("gift")) return "gifting";
+  return "lighting";
+}
 
 export const categories: {
   id: CategoryId;
@@ -72,6 +85,9 @@ export function setCachedStoreProducts(list: Product[]): void {
     const safe = list.map((p) => ({
       ...p,
       image: p.image && p.image.length > 200000 ? p.image.slice(0, 100) : p.image,
+      images: (p as any).images
+        ? (p as any).images.map((img: string) => (img.length > 200000 ? img.slice(0, 100) : img))
+        : [],
     }));
     localStorage.setItem(STORE_PRODUCTS_CACHE_KEY, JSON.stringify(safe));
   } catch (e) {
@@ -90,7 +106,7 @@ export function formatBackendProduct(p: any): Product {
     tagline: p.tagline || (p.description ? p.description.slice(0, 80) : ""),
     price: Number(p.price) || 0,
     compareAt: p.compareAt ? Number(p.compareAt) : p.discountPrice ? Number(p.discountPrice) : undefined,
-    category: (p.categoryId || p.category || "lighting") as CategoryId,
+    category: normalizeCategoryId(p.categoryId || p.category),
     image: p.image || (p.images && p.images[0]) || fallbackImg,
     rating: Number(p.rating) || 5,
     reviews: Number(p.reviews) || 0,
@@ -116,10 +132,23 @@ export function setGlobalProducts(list: any[]): Product[] {
 
 export async function fetchStoreProducts(): Promise<Product[]> {
   try {
-    const res = await fetch(`${getApiBaseUrl()}/products?limit=100`);
-    const json = await res.json();
-    if (json.success && Array.isArray(json.data)) {
-      return setGlobalProducts(json.data);
+    const baseUrl = getApiBaseUrl();
+    let res = await fetch(`${baseUrl}/products?limit=100`).catch(() => null);
+
+    // If local proxy failed and we are on localhost, fallback to PRODUCTION_API_URL
+    if (
+      (!res || !res.ok) &&
+      typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ) {
+      res = await fetch(`${PRODUCTION_API_URL}/products?limit=100`).catch(() => null);
+    }
+
+    if (res && res.ok) {
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        return setGlobalProducts(json.data);
+      }
     }
   } catch (err) {
     console.warn("[Products] Could not fetch products from server:", err);

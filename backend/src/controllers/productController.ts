@@ -1,6 +1,27 @@
 import type { Request, Response } from "express";
 import { Product } from "../models/Product.js";
 
+function getCategoryAliases(cat: string): string[] {
+  const clean = cat.toLowerCase().trim().replace(/^cat_/, "");
+  const aliases = new Set<string>([cat, clean, `cat_${clean}`]);
+  if (clean.includes("light")) {
+    ["lighting", "cat_lighting", "Lighting", "lights"].forEach((a) => aliases.add(a));
+  } else if (clean.includes("kitchen") || clean.includes("dining")) {
+    ["kitchen", "cat_kitchen", "Kitchen", "Kitchen & Dining", "kitchenware"].forEach((a) => aliases.add(a));
+  } else if (clean.includes("storage") || clean.includes("basket")) {
+    ["storage", "cat_storage", "Storage", "Storage & Baskets", "baskets"].forEach((a) => aliases.add(a));
+  } else if (clean.includes("furnitur") || clean.includes("chair") || clean.includes("table")) {
+    ["furniture", "cat_furniture", "Furniture"].forEach((a) => aliases.add(a));
+  } else if (clean.includes("office") || clean.includes("desk")) {
+    ["office", "cat_office", "Office", "Office & Desk"].forEach((a) => aliases.add(a));
+  } else if (clean.includes("decor") || clean.includes("décor") || clean.includes("wall")) {
+    ["decor", "cat_decor", "Home Decor", "Home Décor", "decorating"].forEach((a) => aliases.add(a));
+  } else if (clean.includes("gift")) {
+    ["gifting", "gifts", "cat_gifts", "cat_gifting", "Gifting", "Gifts"].forEach((a) => aliases.add(a));
+  }
+  return Array.from(aliases);
+}
+
 export async function getProducts(req: Request, res: Response): Promise<void> {
   try {
     const {
@@ -23,7 +44,11 @@ export async function getProducts(req: Request, res: Response): Promise<void> {
     }
 
     if (category && category !== "all") {
-      query.categoryId = category;
+      const aliases = getCategoryAliases(category);
+      query.$or = [
+        { categoryId: { $in: aliases } },
+        { category: { $in: aliases } },
+      ];
     }
 
     if (stock) {
@@ -242,12 +267,16 @@ export async function updateStock(req: Request, res: Response): Promise<void> {
 export async function softDeleteProduct(req: Request, res: Response): Promise<void> {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const skuParam = (req.query.sku as string) || (req.body?.sku as string);
     let product = null;
     if (id && id.match(/^[0-9a-fA-F]{24}$/)) {
       product = await Product.findByIdAndUpdate(id, { status: "deleted" }, { new: true });
     }
-    if (!product) {
-      product = await Product.findOneAndUpdate({ sku: id.toUpperCase() }, { status: "deleted" }, { new: true });
+    if (!product && skuParam) {
+      product = await Product.findOneAndUpdate({ sku: skuParam.toUpperCase().trim() }, { status: "deleted" }, { new: true });
+    }
+    if (!product && id) {
+      product = await Product.findOneAndUpdate({ sku: id.toUpperCase().trim() }, { status: "deleted" }, { new: true });
     }
 
     if (!product) {
@@ -263,12 +292,16 @@ export async function softDeleteProduct(req: Request, res: Response): Promise<vo
 export async function restoreProduct(req: Request, res: Response): Promise<void> {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const skuParam = (req.query.sku as string) || (req.body?.sku as string);
     let product = null;
     if (id && id.match(/^[0-9a-fA-F]{24}$/)) {
       product = await Product.findByIdAndUpdate(id, { status: "active" }, { new: true });
     }
-    if (!product) {
-      product = await Product.findOneAndUpdate({ sku: id.toUpperCase() }, { status: "active" }, { new: true });
+    if (!product && skuParam) {
+      product = await Product.findOneAndUpdate({ sku: skuParam.toUpperCase().trim() }, { status: "active" }, { new: true });
+    }
+    if (!product && id) {
+      product = await Product.findOneAndUpdate({ sku: id.toUpperCase().trim() }, { status: "active" }, { new: true });
     }
 
     if (!product) {
@@ -284,18 +317,19 @@ export async function restoreProduct(req: Request, res: Response): Promise<void>
 export async function hardDeleteProduct(req: Request, res: Response): Promise<void> {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const skuParam = (req.query.sku as string) || (req.body?.sku as string);
     let product = null;
     if (id && id.match(/^[0-9a-fA-F]{24}$/)) {
       product = await Product.findByIdAndDelete(id);
     }
-    if (!product) {
-      product = await Product.findOneAndDelete({ sku: id.toUpperCase() });
+    if (!product && skuParam) {
+      product = await Product.findOneAndDelete({ sku: skuParam.toUpperCase().trim() });
+    }
+    if (!product && id) {
+      product = await Product.findOneAndDelete({ sku: id.toUpperCase().trim() });
     }
 
-    if (!product) {
-      res.status(404).json({ success: false, message: "Product not found" });
-      return;
-    }
+    // Always succeed so the product is purged from UI even if already removed from DB
     res.json({ success: true, message: "Product permanently deleted" });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });

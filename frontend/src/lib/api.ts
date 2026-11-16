@@ -11,33 +11,20 @@ const USER_KEY = "thh_customer_user";
 const ADMIN_TOKEN_KEY = "thh_admin_token";
 
 export function getApiBaseUrl(): string {
-  const envUrl = import.meta.env.VITE_API_URL;
-  if (envUrl && typeof envUrl === "string" && envUrl.trim() !== "") {
-    // If accessed from a mobile device or other local network device (e.g. 192.168.x.x)
-    // but VITE_API_URL was set to localhost, fallback to relative "/api" or PRODUCTION_API_URL
-    if (typeof window !== "undefined") {
-      try {
-        const parsed = new URL(envUrl, window.location.origin);
-        if (
-          (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") &&
-          window.location.hostname !== "localhost" &&
-          window.location.hostname !== "127.0.0.1"
-        ) {
-          // If in production build on hostinger, use PRODUCTION_API_URL
-          if (window.location.hostname.includes("hostingersite.com") || window.location.hostname.includes("thehandicrafthouse.com")) {
-            return PRODUCTION_API_URL;
-          }
-          return "/api";
-        }
-      } catch { }
-    }
-    return envUrl.replace(/\/$/, "");
-  }
-
   if (typeof window !== "undefined") {
+    // On localhost or local dev, prefer relative "/api" (which Vite proxies to local backend on port 5001)
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return "/api";
+    }
+    // On live production site
     if (window.location.hostname.includes("hostingersite.com") || window.location.hostname.includes("thehandicrafthouse.com")) {
       return PRODUCTION_API_URL;
     }
+  }
+
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && typeof envUrl === "string" && envUrl.trim() !== "") {
+    return envUrl.replace(/\/$/, "");
   }
 
   return "/api";
